@@ -27,6 +27,7 @@ Each running `claude` CLI session lights up one key on your deck — project nam
 - **Live per-session state** — sessions auto-fill the slots in start-time order; excess sessions beyond the slot count are simply not displayed.
 - **Press → page through sessions.** Keys show a window onto the session list, ordered "needs you first, then most recently active" (see [`docs/architecture.md`](docs/architecture.md#slot-ordering)). A press scrolls that window one page down and wraps at the end; the corner badge is the absolute position, so you can tell 3-of-5 from 1-of-5. The view snaps back to the top on its own as soon as a session newly needs your input.
 - **Long-press (≥500 ms) → reset that session's state log** — useful if a stuck `awaiting` lingers.
+- **Plan usage keys** — three optional keys mirror your Claude subscription's rate limits: the 5-hour session window, the weekly all-models window, and whatever per-model weekly buckets the server reports (labelled with the server's own names). Colour steps quietly green → amber → orange → red, and the footer counts down to the reset. Read straight from the usage snapshot Claude Code caches in `~/.claude.json` — no credentials, no network call. macOS only.
 - **Setup key** — wipes all event logs and re-renders every slot in one press. Also self-checks the hook registration: if it's stale or missing (icons would silently break — e.g. a permission padlock that never clears), the key shows an amber **HOOKS** warning. Fix with `pnpm install:hook`, then reload.
 
 ## Compatibility
@@ -38,6 +39,7 @@ Each running `claude` CLI session lights up one key on your deck — project nam
 | **Stream Deck app on Linux** | Not supported — Elgato doesn't ship a Linux app |
 | **Node.js** | ≥ 20 (bundled into the plugin runtime by the Stream Deck app) |
 | **Terminal integration** | none — a key press pages the deck instead (the Warp tab focus code is still in `src/warp-*.ts`, unwired) |
+| **Plan usage keys** | macOS only — they read the CLI host's `~/.claude.json`, which the Windows-side plugin reaches over a UNC path into a different home |
 
 ## Install
 
@@ -81,6 +83,8 @@ After linking, **quit + relaunch the Stream Deck app** (right-click tray icon �
 Drag **Claude Session Slot** onto as many keys as you want to dedicate to live sessions. The plugin orders them by deck position (top-to-bottom, left-to-right). Optionally, drag the **Claude Setup** action onto one more key as a maintenance button.
 
 Run `claude` in a terminal — the first slot fills with the project name, amber while working, blue when idle. Open `claude` in another `cwd` and slot 2 lights up.
+
+For plan limits, drag **Claude Usage: Session (5h)**, **Claude Usage: Week (all models)** and **Claude Usage: Week (per model)** onto up to three more keys. The numbers come from the snapshot Claude Code caches in `~/.claude.json`, so a percentage only advances while some session is talking to the API — an amber dot in the corner flags a reading older than 15 minutes. The reset countdown is unaffected by that (it is an absolute timestamp) and keeps ticking; the footer only falls back to stating the snapshot's age when there is no future reset left to show. Pressing any of the three re-reads and repaints all of them.
 
 ## Development
 

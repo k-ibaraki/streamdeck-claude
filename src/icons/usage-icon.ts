@@ -51,8 +51,11 @@ ${body}
 </svg>`;
 }
 
+/** Full opacity on purpose: at 11px the title counts as normal text for WCAG,
+ *  and dimming the red accent to 0.85 dropped it to 3.9:1 — worst legibility
+ *  exactly at the 90%+ reading that most needs to be read. */
 function title(text: string, color: string): string {
-  return `<text x="72" y="26" font-family="${SANS}" font-size="11" font-weight="700" letter-spacing="0.12em" fill="${color}" opacity="0.85" text-anchor="middle">${xmlEscape(text)}</text>`;
+  return `<text x="72" y="26" font-family="${SANS}" font-size="11" font-weight="700" letter-spacing="0.12em" fill="${color}" text-anchor="middle">${xmlEscape(text)}</text>`;
 }
 
 function footer(text: string, color = MUTED): string {

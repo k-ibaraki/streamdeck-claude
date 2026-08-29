@@ -40,8 +40,10 @@ export interface UsageSnapshot {
   modelScoped: ScopedUsageWindow[];
 }
 
-/** Named windows we fall back to when the server sends no `limits[]` array.
- *  Keys are the API's, values the label we draw. */
+/** Model-scoped windows the API exposes as named top-level keys rather than
+ *  through `limits[]`. Claude Code's own `/usage` lists these *alongside* the
+ *  `limits[]` buckets, not instead of them, so we merge both sources. Values
+ *  are the label we draw when the server gives us no `display_name`. */
 const NAMED_MODEL_WINDOWS: ReadonlyArray<readonly [string, string]> = [
   ["seven_day_opus", "Opus"],
   ["seven_day_sonnet", "Sonnet"],
@@ -86,6 +88,23 @@ function toModelScoped(raw: unknown): ScopedUsageWindow[] {
   return out;
 }
 
+/** Every per-model weekly window the payload carries, worst first. The
+ *  `limits[]` buckets win on collision because they come with the server's own
+ *  label; the named windows only fill in what `limits[]` didn't mention.
+ *  Dedup is by exact label, so a server that spells the same bucket two ways
+ *  ("Opus" vs "Claude Opus 4.5") would surface both rows — which is what
+ *  Claude Code's own usage screen does too, and is the safe way to fail. */
+function collectModelScoped(u: Record<string, unknown>): ScopedUsageWindow[] {
+  const byLabel = new Map<string, ScopedUsageWindow>();
+  for (const w of toModelScoped(u.limits)) byLabel.set(w.label, w);
+  for (const [key, label] of NAMED_MODEL_WINDOWS) {
+    if (byLabel.has(label)) continue;
+    const w = toWindow(u[key]);
+    if (w) byLabel.set(label, { ...w, label });
+  }
+  return [...byLabel.values()].sort((a, b) => b.percent - a.percent);
+}
+
 function parseSnapshot(blob: unknown): UsageSnapshot | undefined {
   const cached = asRecord(asRecord(blob)?.cachedUsageUtilization);
   if (!cached) return undefined;
@@ -93,20 +112,11 @@ function parseSnapshot(blob: unknown): UsageSnapshot | undefined {
   const u = asRecord(cached.utilization);
   if (typeof fetchedAtMs !== "number" || !u) return undefined;
 
-  let modelScoped = toModelScoped(u.limits);
-  if (modelScoped.length === 0) {
-    for (const [key, label] of NAMED_MODEL_WINDOWS) {
-      const w = toWindow(u[key]);
-      if (w) modelScoped.push({ ...w, label });
-    }
-  }
-  modelScoped = modelScoped.sort((a, b) => b.percent - a.percent);
-
   return {
     fetchedAtMs,
     fiveHour: toWindow(u.five_hour),
     sevenDay: toWindow(u.seven_day),
-    modelScoped,
+    modelScoped: collectModelScoped(u),
   };
 }
 

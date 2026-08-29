@@ -77,6 +77,7 @@ async function advanceView(): Promise<void> {
  *  deck. Reading is mtime-gated in usage.ts, so calling this every tick costs
  *  a stat() in the common case. */
 async function renderUsage(): Promise<void> {
+  if (!usageActions.some((a) => a.hasInstances())) return;
   const snapshot = USAGE_SUPPORTED ? await readUsageSnapshot() : undefined;
   await Promise.all(usageActions.map((a) => a.render(snapshot)));
 }

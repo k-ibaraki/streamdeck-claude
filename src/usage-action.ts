@@ -54,6 +54,13 @@ abstract class UsageAction extends SingletonAction {
     }
   }
 
+  /** True when at least one instance of this action sits on the deck. Lets the
+   *  tick skip reading the usage cache altogether for users who never place a
+   *  usage key. */
+  hasInstances(): boolean {
+    return this.instances.size > 0;
+  }
+
   async render(snapshot: UsageSnapshot | undefined): Promise<void> {
     if (this.instances.size === 0) return;
     const svg = renderUsageIcon({ kind: this.kind, snapshot, supported: USAGE_SUPPORTED });
