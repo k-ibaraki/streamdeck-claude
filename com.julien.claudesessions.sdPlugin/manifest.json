@@ -62,6 +62,57 @@
           "ShowTitle": false
         }
       ]
+    },
+    {
+      "Name": "Claude Usage: Session (5h)",
+      "UUID": "com.julien.claudesessions.usage.session",
+      "Icon": "imgs/actions/usage/icon",
+      "Tooltip": "5-hour usage window of your Claude plan. Press to refresh all usage keys.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/actions/usage/key",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Claude Usage: Week (all models)",
+      "UUID": "com.julien.claudesessions.usage.week",
+      "Icon": "imgs/actions/usage/icon",
+      "Tooltip": "Weekly usage window of your Claude plan. Press to refresh all usage keys.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/actions/usage/key",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "Claude Usage: Week (per model)",
+      "UUID": "com.julien.claudesessions.usage.models",
+      "Icon": "imgs/actions/usage/icon",
+      "Tooltip": "Per-model weekly usage windows. Press to refresh all usage keys.",
+      "Controllers": [
+        "Keypad"
+      ],
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/actions/usage/key",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
+        }
+      ]
     }
   ]
 }

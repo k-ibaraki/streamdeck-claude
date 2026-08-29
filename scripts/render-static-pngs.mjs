@@ -26,6 +26,10 @@ const TARGETS = [
   { svg: "setup-action-icon.svg",  out: "actions/setup/icon@2x.png",      size: 80 },
   { svg: "setup-default-key.svg",  out: "actions/setup/key.png",          size: 144 },
   { svg: "setup-default-key.svg",  out: "actions/setup/key@2x.png",       size: 288 },
+  { svg: "usage-action-icon.svg",  out: "actions/usage/icon.png",          size: 40 },
+  { svg: "usage-action-icon.svg",  out: "actions/usage/icon@2x.png",       size: 80 },
+  { svg: "usage-default-key.svg",  out: "actions/usage/key.png",           size: 144 },
+  { svg: "usage-default-key.svg",  out: "actions/usage/key@2x.png",        size: 288 },
 ];
 
 for (const t of TARGETS) {

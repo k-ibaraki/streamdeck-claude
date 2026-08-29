@@ -8,6 +8,13 @@ import { renderAll } from "./render-loop.js";
 import { wipeAllEventLogs, wipeSessionEventLog, type SessionOrigin } from "./sessions.js";
 import { killSession } from "./kill-session.js";
 import { checkHooks, HOOK_FIX_HINT } from "./hook-check.js";
+import {
+  USAGE_SUPPORTED,
+  UsageModelsAction,
+  UsageSessionAction,
+  UsageWeekAction,
+} from "./usage-action.js";
+import { invalidateUsageCache, readUsageSnapshot } from "./usage.js";
 
 streamDeck.logger.setLevel(LogLevel.DEBUG);
 
@@ -24,6 +31,7 @@ async function runSlowTick(): Promise<void> {
   try {
     const entries = await tracker.tick(slotAction.orderedActions().length);
     await renderAll(slotAction, entries, frame);
+    await renderUsage();
   } catch (err) {
     streamDeck.logger.error("tick failed", err);
   } finally {
@@ -65,11 +73,34 @@ async function advanceView(): Promise<void> {
   await runSlowTick();
 }
 
+/** Pushes the current usage snapshot onto whichever usage keys are on the
+ *  deck. Reading is mtime-gated in usage.ts, so calling this every tick costs
+ *  a stat() in the common case. */
+async function renderUsage(): Promise<void> {
+  const snapshot = USAGE_SUPPORTED ? await readUsageSnapshot() : undefined;
+  await Promise.all(usageActions.map((a) => a.render(snapshot)));
+}
+
+/** Key press on any usage key: force a re-read and repaint all three. */
+async function refreshUsage(): Promise<void> {
+  invalidateUsageCache();
+  await renderUsage();
+}
+
 const slotAction = new SlotAction(resetSlot, killSlot, advanceView);
 const setupAction = new SetupAction(refreshNow);
 
+const usageActions = [
+  new UsageSessionAction(refreshUsage),
+  new UsageWeekAction(refreshUsage),
+  new UsageModelsAction(refreshUsage),
+];
+
 streamDeck.actions.registerAction(slotAction);
 streamDeck.actions.registerAction(setupAction);
+for (const usageAction of usageActions) {
+  streamDeck.actions.registerAction(usageAction);
+}
 await streamDeck.connect();
 
 watchForReload({ pollMs: POLL_MS });

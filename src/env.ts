@@ -47,6 +47,10 @@ export const WSL_RELOAD_FILE = join(WSL_HOME, ".claude", ".streamdeck-claude.rel
 /** Claude Code user-global settings.json (where install-hook.sh writes the hook). */
 export const WSL_SETTINGS_FILE = join(WSL_HOME, ".claude", "settings.json");
 
+/** Claude Code's user-global config blob. Among much else it holds
+ *  `cachedUsageUtilization`, the plan-usage snapshot the usage keys read. */
+export const CLAUDE_CONFIG_FILE = join(WSL_HOME, ".claude.json");
+
 /** Same paths, but as UNC the Windows-side plugin can read. */
 export const WSL_SESSIONS_DIR_FROM_WIN =
   `\\\\wsl.localhost\\${WSL_DISTRO}${WSL_HOME.replace(/\//g, "\\")}\\.claude\\sessions`;

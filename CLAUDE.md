@@ -59,6 +59,31 @@ State priority for an idle session: `awaiting_plan` > `awaiting` > plain `idle`.
 
 Icon code is split per concern across `src/icons/`: `theme.ts` (constants), `motifs.ts` (animated SVG fragments per state), `states.ts` (the single `STATES` registry mapping each `SessionState` to palette + motif + animated flag), `text.ts` (label splitting + marquee), `render.ts` (compose the final SVG). Adding a new state = one entry in `STATES` + plumb it through `deriveState`.
 
+### Plan usage keys (`src/usage.ts`, `src/icons/usage-icon.ts`, `src/usage-action.ts`)
+
+Three optional keys mirror the Claude subscription's rate-limit windows: the 5-hour
+session window, the weekly all-models window, and the per-model weekly windows
+(whatever buckets the server emits — "Fable", "Opus", … — never hardcoded).
+
+The data source is **`~/.claude.json` → `cachedUsageUtilization`**, where Claude Code
+parks the verbatim `/api/oauth/usage` payload it fetched (its own cache TTL is 5
+minutes). Reading that file means no credentials, no network call and no undocumented
+HTTP from the plugin; the cost is that the numbers freeze whenever no CC session is
+talking to the API, so `fetchedAtMs` drives a corner dot past 15 minutes and replaces
+the reset countdown past 30. `readUsageSnapshot()` gates re-parsing on the file's
+mtime — the blob is ~250KB and only the usage slice matters.
+
+Note the shape differences that bite: `resets_at` is an **ISO string** here (the
+statusLine payload uses epoch seconds), named windows carry `utilization` while
+`limits[]` entries carry `percent`, and `limits[]` entries may be scoped to a
+`surface` rather than a `model` — only model-scoped ones belong on the per-model key.
+Windows that don't apply to the account come back as `null`, so every field is
+optional and unknown/renamed windows fall out silently.
+
+macOS only: on Windows the plugin reads sessions over a UNC path into a different
+home, so `USAGE_SUPPORTED` is false there and the keys render "macOS only" rather
+than guessing a path.
+
 ### Warp tab focus on slot press (`src/warp-focus*.ts`, `src/warp-db.ts`, `src/warp-cwd.ts`)
 
 Pressing a slot key tries to bring the Warp terminal tab whose cwd matches the session forward (best-effort, no-op on unsupported platforms). `warp-focus.ts` dispatches by `process.platform`: macOS via `warp-focus-mac.ts` (AppleScript), Windows via `warp-focus-win.ts` (Warp's local SQLite tab DB read through `warp-db.ts` + Win32 window activation). Clipboard fallback (the session cwd) still runs regardless so the user always has something to paste if no tab matched. `scripts/check-warp` is a CLI sanity-check for the Warp DB read path.
