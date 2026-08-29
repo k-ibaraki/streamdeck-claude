@@ -36,7 +36,7 @@ The window resets to 0 when a session **newly** enters an `ATTENTION_STATES` sta
 
 `tick`'s log line carries `view=<offset>/<total>`, and `maybeLog` dedups on the whole string, so the log records exactly the ticks where the window moved. The explicit tiebreak is load-bearing: sessions restored in one batch share a `SessionStart` ts to the millisecond, and relying on sort stability there would hand the order to `readOneSource`'s `Promise.all` push order, which varies per tick and would repaint every key for nothing.
 
-Because slot identity can now change between two ticks, a key press pins the cwd and label it was showing at `KeyDown` (`SlotState.pressedCwd` / `pressedLabel`); the kill target's pid was already captured in `onKeyDown`'s locals.
+Because slot identity can now change between two ticks, a key press pins the caption it was showing at `KeyDown` (`SlotState.pressedLabel` / `pressedBadge`); the kill target's pid was already captured in `onKeyDown`'s locals.
 
 ## State derivation
 
@@ -93,11 +93,15 @@ The plugin runs inside the Stream Deck app on Windows where neither `HOME` nor `
 
 `SlotAction.orderedActions()` sorts visible action instances by Stream Deck `(row, column)` — that's what defines slot 1..N. `renderAll()` zips slots with `DisplayEntry[]`, calls `renderIcon()` to produce an SVG, base64-encodes a `data:image/svg+xml;base64,…` URL, and only calls `setImage` when the URL changed (per-slot dedup via `slotState.lastSvg`).
 
+A key shows one meaning per line: the repo name on top (or the session name the user pinned, when `nameSource` isn't `"derived"`), the current branch below — a short SHA when HEAD is detached, nothing at all outside a repo. Both scroll when they overflow the 124px viewport. Claude Code's own derived name is `<cwd basename>-<suffix>`; the suffix is demoted to a top-left badge, sharing that corner with the `bg` tag, because it's the only thing distinguishing two sessions running in the same worktree.
+
+Repo and branch come from `src/git-info.ts`, which reads git's plumbing (`.git/HEAD`, plus `gitdir:`/`commondir` for linked worktrees) instead of spawning `git` — the slow tick runs once a second across every live session. Both the cwd→repo resolution and the parsed HEAD are memoised, the latter gated on (mtime, size) like the caches in `sessions.ts`, and pruned against the live session set. Every path first goes through `localPathForOrigin()` in `env.ts`: a WSL session records `/home/u/proj`, which the Windows-side plugin can only open as `\\wsl.localhost\<distro>\home\u\proj`. Anything unreachable degrades to "no branch line" rather than throwing.
+
 Icon code is split per concern across `src/icons/`:
 - `theme.ts` — palette / dimension constants
 - `motifs.ts` — animated SVG fragments per state
 - `states.ts` — the single `STATES` registry mapping each `SessionState` to palette + motif + animation flag
-- `text.ts` — label splitting + marquee
+- `text.ts` — marquee + width estimation
 - `render.ts` — composes the final SVG
 
 The plan-usage keys are a second, much simpler path through the same idea:

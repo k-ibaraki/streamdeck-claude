@@ -13,23 +13,6 @@ export function approxWidth(text: string, fontSize: number): number {
   return text.length * fontSize * 0.58;
 }
 
-/** Splits a project label by `-` or whitespace into (top, line1, line2). */
-export function splitLabel(label: string): { top: string; line1: string; line2: string } {
-  const tokens = label.split(/[-\s]+/).filter(Boolean);
-  if (tokens.length === 0) return { top: label, line1: "", line2: "" };
-  const top = tokens[0];
-  const rest = tokens.slice(1);
-  if (rest.length === 0) return { top, line1: "", line2: "" };
-  if (rest.length === 1) return { top, line1: rest[0], line2: "" };
-  if (rest.length === 2) return { top, line1: rest[0], line2: rest[1] };
-  const mid = Math.ceil(rest.length / 2);
-  return {
-    top,
-    line1: rest.slice(0, mid).join("-"),
-    line2: rest.slice(mid).join("-"),
-  };
-}
-
 /** Returns the SVG fragment for one centered/marqueed line. `idSuffix` must be unique
  *  per call within the same icon (the SVG <clipPath> ids are scoped to that document). */
 export function textLine(opts: {

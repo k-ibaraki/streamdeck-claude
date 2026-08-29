@@ -25,13 +25,14 @@ Every running `claude` CLI writes a JSON file to `<HOME>/.claude/sessions/<pid>.
   "status": "busy",
   "updatedAt": 1778324166394,
   "name": "html-effectiveness-doc",
+  "nameSource": "derived",
   "bridgeSessionId": "session_01ER..."
 }
 ```
 
 Confirmed values for `status`: only `"busy"` and `"idle"`. **There is no native `awaiting_permission` value** — see "Notification hook" below for our workaround.
 
-`name` is set when the user gave the session a custom title (`/title`) or for managed-agent sessions; otherwise absent. `bridgeSessionId` indicates a managed/remote agent session. Treat both as best-effort and fall back to `basename(cwd)` for a label.
+`name` used to appear only when the user set a custom title (`/title`) or for managed-agent sessions. **From 2.1.x it is always present**: absent a title, Claude Code derives one as `<cwd basename>-<2-char suffix>` (`streamdeck-claude-b7`) and tags it `"nameSource": "derived"`. So a non-empty `name` no longer means a human chose it — check `nameSource` before treating it as a label, or you'll show a meaningless suffix. The suffix is still worth keeping somewhere: it is the only field distinguishing two sessions running in the same directory. Older builds omit `nameSource` entirely, so fall back to matching the derived shape. `bridgeSessionId` indicates a managed/remote agent session. Both remain best-effort; `basename(cwd)` is the safe fallback for a label.
 
 **Files persist after the process exits.** They are not cleaned up. Always combine the file scan with a liveness check; a session file alone tells you nothing.
 

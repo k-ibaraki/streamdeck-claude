@@ -6,6 +6,7 @@ import type { SessionState } from "./icons/index.js";
 import { WIN_SESSIONS_DIR, WSL_SESSIONS_DIR, WSL_SESSIONS_DIR_FROM_WIN,
   USAGE_REFRESH_DIR,
 } from "./env.js";
+import { pruneGitCache, readGitInfo } from "./git-info.js";
 import { parseEventLog, reduceEvents, type DerivedState, type TodoStatus } from "./session-events.js";
 
 /** WSL or Windows-native Claude Code session — they live in different folders
@@ -63,6 +64,9 @@ interface RawSession {
   status?: string;
   updatedAt?: number;
   name?: string;
+  /** "derived" when Claude Code generated `name` itself from the cwd. Absent on
+   *  older CC builds and on names the user pinned explicitly. */
+  nameSource?: string;
   /** "interactive" | "bg" (Claude Code 2.1.x). Absent sur les anciennes versions. */
   kind?: string;
   /** Pour les bg en attente : ex. "permission prompt". */
@@ -73,8 +77,18 @@ export interface SessionInfo {
   pid: number;
   sessionId: string;
   cwd: string;
-  /** Project label = name field if set, else basename(cwd). */
+  /** Top line on the key: the json's `name` when the user pinned one, else the
+   *  repo name. */
   label: string;
+  /** Repo name from git plumbing; falls back to basename(cwd) outside a repo. */
+  repo: string;
+  /** Current branch, or a short SHA when HEAD is detached. undefined when the
+   *  cwd isn't in a repo this process can reach. */
+  branch?: string;
+  /** Short disambiguator lifted from Claude Code's derived name (`…-b7`). Two
+   *  sessions sharing one worktree differ by nothing else, so it survives as a
+   *  corner badge even though it says nothing on its own. */
+  badge?: string;
   startedAt: number;
   rawStatus: "busy" | "idle";
   /** Awaiting a generic input notification from the user (elicitation_dialog,
@@ -119,6 +133,17 @@ function basename(p: string): string {
   // Handle both `/` and `\` since Windows sessions report `D:\dev\foo`.
   const m = p.replace(/[\\/]+$/, "").match(/[^\\/]+$/);
   return m ? m[0] : p;
+}
+
+/** Pulls the `-b7` tail off a Claude-Code-derived name (`<cwd basename>-<suffix>`).
+ *  Deliberately strict: on any other shape we return undefined (no badge) rather
+ *  than guessing at the last `-` segment, which on a plain `streamdeck-claude`
+ *  would put the word "claude" in the corner — the exact kind of meaningless
+ *  fragment this whole layout exists to get rid of. */
+function derivedSuffix(name: string, cwdBase: string): string | undefined {
+  if (!cwdBase || !name.startsWith(`${cwdBase}-`)) return undefined;
+  const tail = name.slice(cwdBase.length + 1);
+  return /^[a-z0-9]{1,4}$/i.test(tail) ? tail : undefined;
 }
 
 async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
@@ -195,6 +220,21 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
           }
         }
 
+        // Display identity. Claude Code's own derived name is `<cwd basename>-<suffix>`,
+        // which the icon used to split into meaningless fragments ("streamdeck",
+        // "claude", "b7"); repo + branch says the same thing legibly, and the
+        // suffix is demoted to a badge. A name the user pinned still wins.
+        const cwdBase = basename(raw.cwd);
+        const rawName = raw.name?.trim();
+        const suffix = rawName ? derivedSuffix(rawName, cwdBase) : undefined;
+        // `nameSource` only exists from CC 2.1.x on; older builds get the same
+        // treatment when the name still has the derived shape.
+        const isDerived = raw.nameSource === "derived" || (raw.nameSource === undefined && suffix !== undefined);
+        const gitInfo = await readGitInfo(raw.cwd, src.origin);
+        const repo = gitInfo.repo || cwdBase;
+        const label = !isDerived && rawName ? rawName : repo;
+        const badge = isDerived ? suffix : undefined;
+
         const startedAt = typeof raw.startedAt === "number" ? raw.startedAt : 0;
         // A bg agent never fires a hook, so its only freshness signal is the
         // json's own updatedAt; everyone else rides the event log.
@@ -206,7 +246,10 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
           pid: raw.pid,
           sessionId: raw.sessionId,
           cwd: raw.cwd,
-          label: raw.name?.trim() || basename(raw.cwd),
+          label,
+          repo,
+          branch: gitInfo.branch,
+          badge,
           startedAt,
           lastActivityAt,
           rawStatus: status,
@@ -251,6 +294,7 @@ export async function readAllSessions(): Promise<SessionInfo[]> {
   for (const key of jsonCache.keys()) {
     if (!expectedJson.has(key)) jsonCache.delete(key);
   }
+  await pruneGitCache(sessions.map((s) => ({ cwd: s.cwd, origin: s.origin })));
   return sessions;
 }
 

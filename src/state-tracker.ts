@@ -186,7 +186,7 @@ export function createStateTracker() {
    * the render call when nothing would actually change.
    */
   function needsAnimation(): boolean {
-    return visibleEntries.some((e) => iconNeedsAnimation(e.state, e.session.label, e.session.todos));
+    return visibleEntries.some((e) => iconNeedsAnimation(e.state, e.session.label, e.session.branch, e.session.todos));
   }
 
   return { tick, getEntries, needsAnimation, advanceView };

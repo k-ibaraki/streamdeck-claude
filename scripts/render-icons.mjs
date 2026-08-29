@@ -24,18 +24,18 @@ const { renderIcon } = await import(resolve(root, "src/icons/index.ts"));
 const FROZEN_NOW = 0;
 
 const SAMPLES = [
-  { state: "working",       slot: 1, label: "streamdeck-claude-sessions", frame: 3, now: FROZEN_NOW },
-  { state: "subagent",      slot: 2, label: "delegated-research",         frame: 3, now: FROZEN_NOW },
-  { state: "idle",          slot: 3, label: "wolfgangparis",              frame: 0, now: FROZEN_NOW },
-  { state: "awaiting",            slot: 4, label: "ascory-website",             frame: 6, now: FROZEN_NOW },
-  { state: "awaiting_permission", slot: 5, label: "deploy-to-prod",             frame: 6, now: FROZEN_NOW },
-  { state: "awaiting_question",   slot: 5, label: "pick-an-option",             frame: 6, now: FROZEN_NOW },
-  { state: "awaiting_plan",       slot: 5, label: "publish-streamdeck-claude",  frame: 6, now: FROZEN_NOW },
-  { state: "error",         slot: 1, label: "rate-limited-turn",          frame: 6, now: FROZEN_NOW },
-  { state: "finished",      slot: 2, label: "loadtestvideo",              frame: 0, now: FROZEN_NOW },
-  { state: "empty",         slot: 3, label: "",                           frame: 0, now: FROZEN_NOW },
-  // Bonus: a long single segment that triggers the marquee on the top line.
-  { state: "working",       slot: 1, label: "very-long-singleword-that-overflows", frame: 0, now: FROZEN_NOW },
+  { state: "working",       slot: 1, label: "streamdeck-claude", branch: "main",             badge: "a6", frame: 3, now: FROZEN_NOW },
+  { state: "subagent",      slot: 2, label: "delegated-research", branch: "feat/agents",                  frame: 3, now: FROZEN_NOW },
+  { state: "idle",          slot: 3, label: "wolfgangparis",      branch: "main",                         frame: 0, now: FROZEN_NOW },
+  { state: "awaiting",            slot: 4, label: "ascory-website",    branch: "fix/nav",                 frame: 6, now: FROZEN_NOW },
+  { state: "awaiting_permission", slot: 5, label: "deploy-to-prod",    branch: "release",                 frame: 6, now: FROZEN_NOW },
+  { state: "awaiting_question",   slot: 5, label: "pick-an-option",    branch: "main",                    frame: 6, now: FROZEN_NOW },
+  { state: "awaiting_plan",       slot: 5, label: "publish",           branch: "feat/plan",               frame: 6, now: FROZEN_NOW },
+  { state: "error",         slot: 1, label: "rate-limited",       branch: "main",                         frame: 6, now: FROZEN_NOW },
+  { state: "finished",      slot: 2, label: "loadtestvideo",      branch: "a1b2c3d",                      frame: 0, now: FROZEN_NOW },
+  { state: "empty",         slot: 3, label: "",                                                           frame: 0, now: FROZEN_NOW },
+  // Bonus: both lines overflowing, which is what puts the marquee on screen.
+  { state: "working", slot: 1, label: "very-long-singleword-that-overflows", branch: "feat/sort-by-last-activity", frame: 0, now: FROZEN_NOW },
 ];
 
 for (const sample of SAMPLES) {

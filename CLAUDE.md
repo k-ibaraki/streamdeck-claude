@@ -57,7 +57,9 @@ State priority for an idle session: `awaiting_plan` > `awaiting` > plain `idle`.
 
 `SlotAction.orderedActions()` sorts visible action instances by Stream Deck `(row, column)` — that's what defines slot 1..N. `renderAll()` zips slots with `DisplayEntry[]`, calls `renderIcon()` to produce an SVG, base64-encodes a `data:image/svg+xml;base64,…` URL, and only calls `setImage` when the URL changed (per-slot dedup via `slotState.lastSvg`). The clipboard payload (`session.cwd`, copied on key press) is refreshed every tick regardless.
 
-Icon code is split per concern across `src/icons/`: `theme.ts` (constants), `motifs.ts` (animated SVG fragments per state), `states.ts` (the single `STATES` registry mapping each `SessionState` to palette + motif + animated flag), `text.ts` (label splitting + marquee), `render.ts` (compose the final SVG). Adding a new state = one entry in `STATES` + plumb it through `deriveState`.
+Icon code is split per concern across `src/icons/`: `theme.ts` (constants), `motifs.ts` (animated SVG fragments per state), `states.ts` (the single `STATES` registry mapping each `SessionState` to palette + motif + animated flag), `text.ts` (marquee + width estimation), `render.ts` (compose the final SVG). Adding a new state = one entry in `STATES` + plumb it through `deriveState`.
+
+Each key carries one meaning per line: repo name on top, current branch below (both marquee'd when they overflow), plus a top-left badge holding the `bg` tag and/or Claude Code's derived name suffix (`b7`) — the only thing telling apart two sessions in the same worktree. Repo/branch come from `src/git-info.ts`, which reads `.git/HEAD` directly (no `git` spawn) and caches on (mtime, size) like the session caches. `session.cwd` is written in the session's *own* namespace, so it goes through `localPathForOrigin()` in `env.ts` before any read — a WSL cwd isn't openable from the Windows-side plugin as-is.
 
 ### Plan usage keys (`src/usage.ts`, `src/usage-refresh.ts`, `src/icons/usage-icon.ts`, `src/usage-action.ts`)
 

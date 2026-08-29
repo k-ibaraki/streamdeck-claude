@@ -1,17 +1,18 @@
 import {
+  BADGE_BASELINE,
+  BADGE_FONT,
   BORDER_INSET,
   BORDER_RADIUS,
   BORDER_SIZE,
   BORDER_STROKE,
+  BOTTOM_BASELINE,
   BOTTOM_FONT,
-  BOTTOM_LINE1_Y,
-  BOTTOM_LINE2_Y,
   MOTIF_DY,
   TOP_BASELINE,
   TOP_FONT,
   VIEWPORT_W,
 } from "./theme.js";
-import { approxWidth, splitLabel, textLine, xmlEscape } from "./text.js";
+import { approxWidth, textLine, xmlEscape } from "./text.js";
 import { STATES, isBgState, type SessionState } from "./states.js";
 import { ANIMATION_FRAMES } from "./motifs.js";
 import type { TodoStatus } from "../session-events.js";
@@ -25,7 +26,13 @@ const PULSE_BG_SPEED = 2;
 export interface IconOptions {
   state: SessionState;
   slot: number;
+  /** Top line — repo name, or the session name the user pinned explicitly. */
   label: string;
+  /** Bottom line — current branch (or short SHA when detached). Omitted when
+   *  the session's cwd isn't in a repo we can read. */
+  branch?: string;
+  /** Corner disambiguator (`b7`) for sessions sharing one worktree. */
+  badge?: string;
   /** Animation frame, 0..ANIMATION_FRAMES-1. */
   frame?: number;
   /** Wall-clock ms; used for marquee. Defaults to Date.now() if omitted. */
@@ -73,22 +80,25 @@ function renderTodoColumn(todos: readonly TodoStatus[], frame: number): string {
 }
 
 function renderSlotBadge(slotText: string, accent: string): string {
-  return `<text x="128" y="22" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="${accent}" opacity="0.8" text-anchor="end">${xmlEscape(slotText)}</text>`;
+  return `<text x="128" y="${BADGE_BASELINE}" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="${BADGE_FONT}" font-weight="700" fill="${accent}" opacity="0.8" text-anchor="end">${xmlEscape(slotText)}</text>`;
 }
 
-function renderBgBadge(accent: string): string {
-  // Coin haut-gauche : 144-128=16 depuis le bord, miroir exact du badge numéro de slot (haut-droite, x=128) → jamais de collision.
-  return `<text x="16" y="22" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="${accent}" opacity="0.8" text-anchor="start">bg</text>`;
+/** Coin haut-gauche : 144-128=16 depuis le bord, miroir exact du badge numéro de
+ *  slot (haut-droite, x=128) → jamais de collision. Porte le tag `bg` et/ou le
+ *  suffixe désambiguïsateur des sessions qui partagent un worktree. */
+function renderTopLeftBadge(text: string, accent: string): string {
+  return `<text x="16" y="${BADGE_BASELINE}" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="${BADGE_FONT}" font-weight="700" fill="${accent}" opacity="0.8" text-anchor="start">${xmlEscape(text)}</text>`;
 }
 
-export function renderIcon({ state, slot, label, frame = 0, now, todos }: IconOptions): string {
+export function renderIcon({ state, slot, label, branch, badge, frame = 0, now, todos }: IconOptions): string {
   const t = now ?? Date.now();
   const { bg, accent, label: labelColor } = STATES[state].palette;
   const slotText = state === "empty" ? "" : String(slot);
   const isEmpty = state === "empty";
-  const { top, line1, line2 } = isEmpty
-    ? { top: "free slot", line1: "", line2: "" }
-    : splitLabel(label);
+  // One meaning per line: which project on top, which branch below. Values too
+  // wide for the key scroll (see textLine) instead of being split or clipped.
+  const top = isEmpty ? "free slot" : label;
+  const bottom = isEmpty ? "" : branch ?? "";
 
   const topLine = textLine({
     text: top,
@@ -100,24 +110,10 @@ export function renderIcon({ state, slot, label, frame = 0, now, todos }: IconOp
     idSuffix: `t${slot}`,
   });
 
-  // When there's a single bottom line, drop it to BOTTOM_LINE2_Y so it sits
-  // visually anchored to the lower edge instead of floating in the middle gap.
-  const singleBottom = line1 && !line2;
-  const line1Svg = line1
+  const bottomSvg = bottom
     ? textLine({
-        text: line1,
-        baseline: singleBottom ? BOTTOM_LINE2_Y : BOTTOM_LINE1_Y,
-        fontSize: BOTTOM_FONT,
-        weight: "600",
-        color: labelColor,
-        now: t,
-        idSuffix: `a${slot}`,
-      })
-    : "";
-  const line2Svg = line2
-    ? textLine({
-        text: line2,
-        baseline: BOTTOM_LINE2_Y,
+        text: bottom,
+        baseline: BOTTOM_BASELINE,
         fontSize: BOTTOM_FONT,
         weight: "600",
         color: labelColor,
@@ -128,7 +124,11 @@ export function renderIcon({ state, slot, label, frame = 0, now, todos }: IconOp
 
   // Slot number badge — inside the safe zone, away from the rounded corner.
   const slotBadge = isEmpty ? "" : renderSlotBadge(slotText, accent);
-  const bgBadge = isBgState(state) ? renderBgBadge(accent) : "";
+  // `bg` tag and the `b7`-style suffix share the top-left corner: two sessions
+  // in the same worktree render identically otherwise, and neither deserves a
+  // whole text line.
+  const cornerText = isEmpty ? "" : [isBgState(state) ? "bg" : "", badge ?? ""].filter(Boolean).join(" ");
+  const cornerBadge = cornerText ? renderTopLeftBadge(cornerText, accent) : "";
 
   let pulseOverlay = "";
   if (STATES[state].pulseBg) {
@@ -147,24 +147,29 @@ export function renderIcon({ state, slot, label, frame = 0, now, todos }: IconOp
 ${pulseOverlay}
 <rect x="${BORDER_INSET}" y="${BORDER_INSET}" width="${BORDER_SIZE}" height="${BORDER_SIZE}" rx="${BORDER_RADIUS}" fill="none" stroke="${accent}" stroke-width="${BORDER_STROKE}" stroke-linejoin="round" opacity="${isEmpty ? "0.45" : "0.95"}"/>
 ${slotBadge}
-${bgBadge}
+${cornerBadge}
 ${topLine}
 <g transform="translate(0,${MOTIF_DY})">${STATES[state].motif(frame, accent)}</g>
-${line1Svg}
-${line2Svg}
+${bottomSvg}
 ${todoColumn}
 </svg>`;
 }
 
 /** True when the icon's visual depends on `frame` or `now` and must be re-rendered often. */
-export function iconNeedsAnimation(state: SessionState, label: string, todos?: readonly TodoStatus[]): boolean {
+export function iconNeedsAnimation(
+  state: SessionState,
+  label: string,
+  branch?: string,
+  todos?: readonly TodoStatus[],
+): boolean {
   if (STATES[state].animated) return true;
   if (todos && todos.some((s) => s === "in_progress")) return true;
-  // Marquee may apply to label even on static states.
-  const { top, line1, line2 } = state === "empty" ? { top: "free slot", line1: "", line2: "" } : splitLabel(label);
+  // Marquee may apply to either line even on static states. Must mirror the
+  // line split renderIcon uses, or the animation loop stops feeding a scroll
+  // that's actually on screen.
+  const top = state === "empty" ? "free slot" : label;
   if (approxWidth(top, TOP_FONT) > VIEWPORT_W) return true;
-  if (line1 && approxWidth(line1, BOTTOM_FONT) > VIEWPORT_W) return true;
-  if (line2 && approxWidth(line2, BOTTOM_FONT) > VIEWPORT_W) return true;
+  if (state !== "empty" && branch && approxWidth(branch, BOTTOM_FONT) > VIEWPORT_W) return true;
   return false;
 }
 
@@ -179,6 +184,10 @@ const KILL_ACCENT = "#ef4444";
 export interface KillArmingOptions {
   slot: number;
   label: string;
+  /** Same corner disambiguator as the normal tile — without it the ring reads
+   *  identically for two sessions sharing a worktree, right when the caption
+   *  matters most. */
+  badge?: string;
   /** 0..1 — fraction du hold écoulée entre LONG_PRESS_MS et KILL_PRESS_MS. */
   progress: number;
   /** Wall-clock ms; used for marquee. Defaults to Date.now() if omitted. */
@@ -188,7 +197,7 @@ export interface KillArmingOptions {
 /** Tile rouge avec un anneau de progression + label "KILL", affichée pendant
  *  que l'utilisateur maintient la touche entre 500ms et 3s. À 1.0 l'anneau est
  *  plein → le kill part. Relâcher avant ramène le slot à son état normal. */
-export function renderKillArming({ slot, label, progress, now }: KillArmingOptions): string {
+export function renderKillArming({ slot, label, badge, progress, now }: KillArmingOptions): string {
   const t = now ?? Date.now();
   const p = Math.max(0, Math.min(1, progress));
   const cx = 72;
@@ -197,9 +206,8 @@ export function renderKillArming({ slot, label, progress, now }: KillArmingOptio
   const circ = 2 * Math.PI * r;
   const offset = (circ * (1 - p)).toFixed(2);
   const overlayOpacity = (0.15 + p * 0.45).toFixed(3);
-  const { top } = splitLabel(label);
   const topLine = textLine({
-    text: top,
+    text: label,
     baseline: TOP_BASELINE,
     fontSize: TOP_FONT,
     weight: "700",
@@ -208,11 +216,13 @@ export function renderKillArming({ slot, label, progress, now }: KillArmingOptio
     idSuffix: `k${slot}`,
   });
   const slotBadge = renderSlotBadge(String(slot), KILL_ACCENT);
+  const cornerBadge = badge ? renderTopLeftBadge(badge, KILL_ACCENT) : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
 <rect width="144" height="144" fill="${KILL_BG}"/>
 <rect width="144" height="144" fill="${KILL_ACCENT}" opacity="${overlayOpacity}"/>
 <rect x="${BORDER_INSET}" y="${BORDER_INSET}" width="${BORDER_SIZE}" height="${BORDER_SIZE}" rx="${BORDER_RADIUS}" fill="none" stroke="${KILL_ACCENT}" stroke-width="${BORDER_STROKE}" stroke-linejoin="round" opacity="0.95"/>
 ${slotBadge}
+${cornerBadge}
 ${topLine}
 <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3a1414" stroke-width="6"/>
 <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${KILL_ACCENT}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${circ.toFixed(2)}" stroke-dashoffset="${offset}" transform="rotate(-90 ${cx} ${cy})"/>
