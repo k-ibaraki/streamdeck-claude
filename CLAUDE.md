@@ -61,6 +61,49 @@ Icon code is split per concern across `src/icons/`: `theme.ts` (constants), `mot
 
 Each key carries one meaning per line: repo name on top, current branch below (both marquee'd when they overflow), plus a top-left badge holding the `bg` tag and/or Claude Code's derived name suffix (`b7`) — the only thing telling apart two sessions in the same worktree. Repo/branch come from `src/git-info.ts`, which reads `.git/HEAD` directly (no `git` spawn) and caches on (mtime, size) like the session caches. `session.cwd` is written in the session's *own* namespace, so it goes through `localPathForOrigin()` in `env.ts` before any read — a WSL cwd isn't openable from the Windows-side plugin as-is.
 
+### Plan usage keys (`src/usage.ts`, `src/usage-refresh.ts`, `src/icons/usage-icon.ts`, `src/usage-action.ts`)
+
+Three optional keys mirror the Claude subscription's rate-limit windows: the 5-hour
+session window, the weekly all-models window, and the per-model weekly windows
+(whatever buckets the server emits — "Fable", "Opus", … — never hardcoded).
+
+The data source is **`~/.claude.json` → `cachedUsageUtilization`**, where Claude Code
+parks the verbatim `/api/oauth/usage` payload it fetched. Reading that file means no
+credentials, no network call and no undocumented HTTP from the plugin.
+`readUsageSnapshot()` gates re-parsing on the file's mtime — the blob is ~250KB and
+only the usage slice matters.
+
+**That cache does not refresh itself.** Claude Code refetches only when something asks
+to *see* usage (startup, `/usage`, the status line, a limit warning); an SDK/GUI-hosted
+session asks for none of those, and the snapshot was measured sitting untouched through
+25+ minutes of continuous work. So `usage-refresh.ts` asks on our behalf: it spawns
+`claude -p "/usage"` every 5½ minutes, which runs the slash command locally (no model
+turn, ~3s) and writes the refreshed snapshot back. The 5½ is deliberate — Claude Code
+refuses to rewrite a snapshot under 5 minutes old, and firing on exactly 5 would
+no-op every other round. It only runs when a usage key is actually on the deck.
+
+The refresher's own session file is the catch: the CLI writes it as
+`kind:"interactive"` like any other, and with `lastActivityAt` of "now" it would sort
+to the top of the non-attention group and shove every key down a slot for ~3s. It runs
+in `USAGE_REFRESH_DIR` (`~/.claude/.streamdeck-usage`) purely so `sessions.ts` can
+recognise its `cwd` and drop it.
+
+Staleness on the tile: `fetchedAtMs` past 15 minutes raises a corner dot, warning that
+the *percentage* may lag. The reset countdown is never suppressed for age — `resets_at`
+is an absolute timestamp and stays true — so the footer only states the snapshot's age
+when there is no future reset left to count down to.
+
+Note the shape differences that bite: `resets_at` is an **ISO string** here (the
+statusLine payload uses epoch seconds), named windows carry `utilization` while
+`limits[]` entries carry `percent`, and `limits[]` entries may be scoped to a
+`surface` rather than a `model` — only model-scoped ones belong on the per-model key.
+Windows that don't apply to the account come back as `null`, so every field is
+optional and unknown/renamed windows fall out silently.
+
+macOS only: on Windows the plugin reads sessions over a UNC path into a different
+home, so `USAGE_SUPPORTED` is false there and the keys render "macOS only" rather
+than guessing a path.
+
 ### Warp tab focus on slot press (`src/warp-focus*.ts`, `src/warp-db.ts`, `src/warp-cwd.ts`)
 
 Pressing a slot key tries to bring the Warp terminal tab whose cwd matches the session forward (best-effort, no-op on unsupported platforms). `warp-focus.ts` dispatches by `process.platform`: macOS via `warp-focus-mac.ts` (AppleScript), Windows via `warp-focus-win.ts` (Warp's local SQLite tab DB read through `warp-db.ts` + Win32 window activation). Clipboard fallback (the session cwd) still runs regardless so the user always has something to paste if no tab matched. `scripts/check-warp` is a CLI sanity-check for the Warp DB read path.
@@ -81,7 +124,7 @@ The Windows hook is **not copied** — `install-hook.sh --target=windows` regist
 
 - TypeScript ESM (`"type": "module"`), Node 20, `strict: true`. Source is `src/**/*.ts`, output is `com.julien.claudesessions.sdPlugin/bin/plugin.js` (single bundled file via rollup).
 - Imports use the `.js` extension even for `.ts` files (NodeNext-style). Don't drop the extension.
-- Two Stream Deck actions are registered: `com.julien.claudesessions.slot` (one key per live CC session, in `src/slot-action.ts`) and `com.julien.claudesessions.setup` (a single maintenance key, in `src/setup-action.ts`). Both use the `@action({ UUID: "..." })` decorator AND must be passed to `streamDeck.actions.registerAction(...)` — the decorator alone is not enough.
+- Five Stream Deck actions are registered: `com.julien.claudesessions.slot` (one key per live CC session, in `src/slot-action.ts`), `com.julien.claudesessions.setup` (a single maintenance key, in `src/setup-action.ts`), and `com.julien.claudesessions.usage.{session,week,models}` (the plan-usage keys, three thin subclasses in `src/usage-action.ts`). All use the `@action({ UUID: "..." })` decorator AND must be passed to `streamDeck.actions.registerAction(...)` — the decorator alone is not enough.
 - The Setup action's key press (and its property inspector "Refresh States" button) calls `refreshNow()` in `plugin.ts`, which `wipeAllEventLogs()` (deletes every `<sid>.events.ndjson` across both source dirs) then runs an immediate `runSlowTick()`. The PI uses raw WebSocket against the Elgato bridge (`connectElgatoStreamDeckSocket`) — the SDK's TS API is plugin-side only.
 - Background context for Stream Deck plugin development inside WSL lives in the local skill `streamdeck-plugin-wsl` (`.claude/skills/`); session-introspection internals (the `<pid>.json` schema, dual-namespace liveness, hook patterns) are in `claude-code-process-introspection`. Invoke them via the `Skill` tool when relevant.
 - `docs/` holds reference notes (`architecture.md`, `development.md`, `warp-focus*.md`). `docs/code-refacto.md` specifically is an audit doc, not authoritative — treat as a record of considered ideas, not a TODO list.

@@ -84,7 +84,7 @@ The plugin runs inside the Stream Deck app on Windows where neither `HOME` nor `
 
 `src/plugin.ts` runs two intervals against the same `state-tracker.ts` instance:
 
-- **Slow tick (1s):** `tracker.tick()` re-reads sessions + liveness + event logs, computes the sorted `DisplayEntry[]`, and `renderAll()`s every slot. Re-entrancy guarded by `slowTickRunning`.
+- **Slow tick (1s):** `tracker.tick()` re-reads sessions + liveness + event logs, computes the sorted `DisplayEntry[]`, and `renderAll()`s every slot. It then calls `renderUsage()` for the plan-usage keys — a no-op that costs nothing when none of them are on the deck. Re-entrancy guarded by `slowTickRunning`.
 - **Animation tick (120ms):** advances `frame`, then renders only if `tracker.needsAnimation()` is true (any animated motif OR a marquee-overflowing label). Same guard pattern.
 
 `createStateTracker()` owns the cross-tick bookkeeping: `prevLiveIds` (so a session is promoted to `finished` only when it was alive *last tick* — stale junk files from previous CC runs never appear) and `recentlyFinished` (carry-over for `FINISHED_TTL_MS = 3000`ms after death).
@@ -103,6 +103,17 @@ Icon code is split per concern across `src/icons/`:
 - `states.ts` — the single `STATES` registry mapping each `SessionState` to palette + motif + animation flag
 - `text.ts` — marquee + width estimation
 - `render.ts` — composes the final SVG
+
+The plan-usage keys are a second, much simpler path through the same idea:
+`usage.ts` parses `~/.claude.json` → `cachedUsageUtilization` (mtime-gated, so
+re-parsing the ~250KB blob is rare), `usage-refresh.ts` keeps that cache from
+going stale by spawning `claude -p "/usage"` on its own interval (Claude Code
+only refetches when something asks to see usage, which an SDK-hosted session
+never does), `icons/usage-icon.ts` draws a static tile per window, and
+`usage-action.ts` dedups by SVG exactly as `renderAll()` does.
+No motif, no animation — the brief was a quiet stepped colour scale. See the
+"Plan usage keys" section of `CLAUDE.md` for the payload's sharp edges (ISO vs
+epoch resets, `utilization` vs `percent`, model- vs surface-scoped entries).
 
 ## Reload trigger
 
@@ -140,6 +151,9 @@ The Windows hook is **not copied** — `scripts/install-hook.sh --target=windows
 │   ├── session-events.ts                 # pure state machine
 │   ├── state-tracker.ts                  # cross-tick bookkeeping
 │   ├── render-loop.ts                    # zip slots → setImage
+│   ├── usage.ts                          # reads ~/.claude.json usage snapshot
+│   ├── usage-action.ts                   # the three plan-usage keys
+│   ├── usage-refresh.ts                  # spawns `claude -p "/usage"` to refresh it
 │   ├── env.ts                            # all path/UNC math (single source)
 │   ├── reload-watcher.ts                 # mtime-driven self-restart
 │   ├── warp-focus.ts                     # platform dispatcher
@@ -147,7 +161,7 @@ The Windows hook is **not copied** — `scripts/install-hook.sh --target=windows
 │   ├── warp-focus-win.ts                 # PowerShell + AttachThreadInput + SendInput
 │   ├── warp-db.ts                        # read-only sqlite3 → (window, tab_index)
 │   ├── warp-cwd.ts                       # Windows UNC / drive normalizer for WSL paths
-│   └── icons/                            # render pipeline (theme/motifs/states/text/render)
+│   └── icons/                            # render pipeline (theme/motifs/states/text/render/usage-icon)
 ├── icons/                                # standalone reference SVGs (one per state)
 ├── hooks/
 │   ├── notification.sh                   # Bash hook (Linux/macOS/WSL)
