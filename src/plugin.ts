@@ -58,7 +58,14 @@ async function killSlot(pid: number, sessionId: string, origin: SessionOrigin): 
   await runSlowTick();
 }
 
-const slotAction = new SlotAction(resetSlot, killSlot);
+/** Short press: page the deck down the session list, then re-render at once so
+ *  the new window (and its slot badge) is the visible confirmation. */
+async function advanceView(): Promise<void> {
+  tracker.advanceView();
+  await runSlowTick();
+}
+
+const slotAction = new SlotAction(resetSlot, killSlot, advanceView);
 const setupAction = new SetupAction(refreshNow);
 
 streamDeck.actions.registerAction(slotAction);
