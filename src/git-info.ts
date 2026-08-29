@@ -36,10 +36,16 @@ interface RepoEntry {
   repo: string;
 }
 
-/** cwd → resolved repo, or null when cwd isn't in a repo we can reach. A repo
- *  never moves under a live session, so this is keyed by the raw session cwd and
- *  only dropped when that session goes away (see pruneGitCache). */
-const repoCache = new Map<string, RepoEntry | null>();
+/** (origin, cwd) → resolved repo, or null when cwd isn't in a repo we can reach.
+ *  A repo never moves under a live session, so entries only drop when the session
+ *  goes away (see pruneGitCache). Keyed by origin too, for the same reason the
+ *  caches in sessions.ts key on full path: the two namespaces can report the same
+ *  string for different directories. The value is the in-flight promise rather
+ *  than the result, so two sessions sharing a worktree walk the tree once — on
+ *  Windows that walk is up to MAX_DEPTH round-trips over the UNC. */
+const repoCache = new Map<string, Promise<RepoEntry | null>>();
+
+const cacheKey = (cwd: string, origin: PathOrigin) => `${origin}:${cwd}`;
 
 /** headPath → parsed branch, gated on (mtimeMs, size) exactly like the caches in
  *  sessions.ts: HEAD changes only on checkout, so re-parsing it every tick is
@@ -108,7 +114,8 @@ function parseHead(txt: string): string {
   const t = txt.trim();
   const m = /^ref:\s*refs\/heads\/(.+)$/.exec(t);
   if (m) return m[1];
-  return /^[0-9a-f]{7,40}$/i.test(t) ? t.slice(0, 7) : "";
+  // 40 hex chars for a SHA-1 repo, 64 for `--object-format=sha256`.
+  return /^[0-9a-f]{7,64}$/i.test(t) ? t.slice(0, 7) : "";
 }
 
 /** Best-effort repo+branch for one session cwd. Never throws: anything we can't
@@ -118,11 +125,16 @@ export async function readGitInfo(cwd: string, origin: PathOrigin): Promise<GitI
   const localCwd = localPathForOrigin(cwd, origin);
   if (!localCwd) return NONE;
 
-  let entry = repoCache.get(cwd);
-  if (entry === undefined) {
-    entry = await resolveRepo(localCwd, origin);
-    repoCache.set(cwd, entry);
+  const key = cacheKey(cwd, origin);
+  let pending = repoCache.get(key);
+  if (!pending) {
+    // `.catch` keeps this function's "never throws" contract even if resolveRepo
+    // grows a path that can reject — a rejected promise left in the map would
+    // otherwise throw on every later tick.
+    pending = resolveRepo(localCwd, origin).catch(() => null);
+    repoCache.set(key, pending);
   }
+  const entry = await pending;
   if (!entry) return NONE;
 
   let branch = "";
@@ -138,21 +150,26 @@ export async function readGitInfo(cwd: string, origin: PathOrigin): Promise<GitI
   } catch {
     // HEAD vanished (repo deleted mid-session?) — drop the memo so a later tick
     // can re-resolve, and fall through with repo only.
-    repoCache.delete(cwd);
+    repoCache.delete(key);
   }
 
   return { repo: entry.repo, branch: branch || undefined };
 }
 
-/** Drops memo entries for cwds no longer backed by a live session, keeping both
- *  maps bounded by live-session count (same contract as the caches in sessions.ts). */
-export function pruneGitCache(activeCwds: Set<string>): void {
+/** Drops memo entries for sessions that are gone, keeping both maps bounded by
+ *  live-session count (same contract as the caches in sessions.ts). Async only
+ *  because repoCache holds promises; by prune time they are all settled. */
+export async function pruneGitCache(
+  active: ReadonlyArray<{ cwd: string; origin: PathOrigin }>,
+): Promise<void> {
+  const liveKeys = new Set(active.map((s) => cacheKey(s.cwd, s.origin)));
   const liveHeads = new Set<string>();
-  for (const [cwd, entry] of repoCache) {
-    if (!activeCwds.has(cwd)) {
-      repoCache.delete(cwd);
+  for (const [key, pending] of repoCache) {
+    if (!liveKeys.has(key)) {
+      repoCache.delete(key);
       continue;
     }
+    const entry = await pending;
     if (entry) liveHeads.add(entry.headPath);
   }
   for (const headPath of headCache.keys()) {

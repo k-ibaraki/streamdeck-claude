@@ -286,7 +286,7 @@ export async function readAllSessions(): Promise<SessionInfo[]> {
   for (const key of jsonCache.keys()) {
     if (!expectedJson.has(key)) jsonCache.delete(key);
   }
-  pruneGitCache(new Set(sessions.map((s) => s.cwd)));
+  await pruneGitCache(sessions.map((s) => ({ cwd: s.cwd, origin: s.origin })));
   return sessions;
 }
 
