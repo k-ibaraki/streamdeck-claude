@@ -4,14 +4,14 @@ const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"
 export const xmlEscape = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
 
 /** Approximate rendered width for a proportional sans/mono mix at the given px size. */
-export function approxWidth(text: string, fontSize: number): number {
+function approxWidth(text: string, fontSize: number): number {
   // Tuned for Segoe UI / system fonts at our weights; close enough for overflow detection.
   return text.length * fontSize * 0.58;
 }
 
 /** Whether `text` is too wide for the key's text band. Single source of truth —
  *  `fitText` asks the same question, so the two can't disagree. */
-export const overflows = (text: string, fontSize: number) =>
+const overflows = (text: string, fontSize: number) =>
   approxWidth(text, fontSize) > VIEWPORT_W;
 
 const ELLIPSIS = "…";
@@ -27,7 +27,7 @@ const CUT_TARGET = VIEWPORT_W * 0.9;
  *  dropped. Deliberately static: a key is glanced at, not read, and a scrolling
  *  line makes you wait for the part you need. A stable truncated string is
  *  legible in the half-second you actually look at the deck. */
-export function fitText(text: string, fontSize: number): string {
+function fitText(text: string, fontSize: number): string {
   if (!overflows(text, fontSize)) return text;
   let n = text.length;
   while (n > 0 && approxWidth(text.slice(0, n) + ELLIPSIS, fontSize) > CUT_TARGET) n--;

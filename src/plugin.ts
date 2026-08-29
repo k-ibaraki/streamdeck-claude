@@ -137,7 +137,7 @@ setInterval(async () => {
   animateRunning = true;
   frame = (frame + 1) % ANIMATION_FRAMES;
   // Skip render if nothing on screen needs to change frame-to-frame
-  // (no animated motif AND no marquee-overflowing label).
+  // (no animated motif AND no pulsing in-progress todo — labels are static).
   if (!tracker.needsAnimation() && !slotAction.anyKillArming()) {
     animateRunning = false;
     return;

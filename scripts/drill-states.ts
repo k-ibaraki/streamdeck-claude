@@ -248,13 +248,13 @@ async function runSingle(state: DrilledState) {
 }
 
 async function runMulti(n: number) {
-  // Mix short, medium and one deliberately long cwd to exercise the marquee
-  // path in src/icons/text.ts.
+  // Mix short, medium and one deliberately long cwd to exercise the ellipsis
+  // truncation in src/icons/text.ts.
   const cwds = [
     process.cwd(),
     "/tmp/short",
     "/home/julien/dev/some-other-project",
-    "/home/julien/dev/a-really-extremely-long-project-name-for-testing-the-marquee-overflow-behavior",
+    "/home/julien/dev/a-really-extremely-long-project-name-for-testing-the-ellipsis-overflow-behavior",
     "/var/tmp/another",
     "/srv/data/yet-another-one",
   ];
@@ -273,7 +273,7 @@ async function runMulti(n: number) {
     applyStep(s, step, base - i * 100);
   }
   console.log(`drill: ${n} parallel sessions — pids=${owned.map((s) => s.pid).join(", ")}`);
-  console.log(`drill: verify slot ordering, marquee on the long label, and overflow if N exceeds visible slots.`);
+  console.log(`drill: verify slot ordering, the ellipsis on the long label, and overflow if N exceeds visible slots.`);
   console.log(`drill: Ctrl-C to exit.\n`);
   await holdForever();
 }

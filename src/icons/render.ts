@@ -39,7 +39,7 @@ export interface IconOptions {
 }
 
 // Left-edge progress column geometry. The column sits at x=2..7, outside the
-// VIEWPORT_X=10 text band, so it never overlaps marquee'd labels.
+// VIEWPORT_X=10 text band, so it never overlaps label text.
 const TODO_X = 2;
 const TODO_BAND_Y0 = 18;
 const TODO_BAND_Y1 = 130;
@@ -157,7 +157,8 @@ export function iconNeedsAnimation(state: SessionState, todos?: readonly TodoSta
   return todos !== undefined && todos.some((s) => s === "in_progress");
 }
 
-/** True when the icon's motif uses `frame` (independent of marquee). */
+/** True when the state's motif uses `frame` (motif only — todo pulsing is the
+ *  caller's concern, see render-loop.ts). */
 export const isAnimated = (s: SessionState) => STATES[s].animated;
 
 /** Palette dédiée à l'état "kill en cours d'armement" (hors registre STATES :
