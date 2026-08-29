@@ -106,8 +106,8 @@ const owned: Owned[] = [];
 function pidJsonPath(pid: number) { return join(SESSIONS_DIR, `${pid}.json`); }
 function eventsPathOf(sid: string) { return join(SESSIONS_DIR, `${sid}.events.ndjson`); }
 
-function writeEvents(s: Owned, lines: EventLine[]) {
-  const t0 = Date.now() - lines.length;
+function writeEvents(s: Owned, lines: EventLine[], endTs = Date.now()) {
+  const t0 = endTs - lines.length;
   const body = lines.map((ev, i) => JSON.stringify({ ts: t0 + i, ...ev })).join("\n") + "\n";
   writeFileSync(s.eventsFile, body);
 }
@@ -124,11 +124,11 @@ function writePidJson(s: Owned, rawStatus: "busy" | "idle") {
   writeFileSync(s.pidFile, JSON.stringify(body));
 }
 
-function applyStep(s: Owned, step: Step) {
+function applyStep(s: Owned, step: Step, endTs?: number) {
   // Events first, then pid.json: when the plugin sees the .json on readdir,
   // the matching events file is already in place — no 1-tick "shows idle then
   // jumps to the real state" flicker on first apply.
-  writeEvents(s, step.events);
+  writeEvents(s, step.events, endTs);
   writePidJson(s, step.rawStatus);
 }
 
@@ -263,11 +263,14 @@ async function runMulti(n: number) {
   for (let i = 0; i < n; i++) {
     const cwd = cwds[i % cwds.length];
     const useOwnPid = i === 0;
-    // Stagger startedAt so slot ordering is deterministic across ticks.
     const s = newSession(i, useOwnPid, cwd, base + i * 100);
     owned.push(s);
     const step = STEPS[NON_FINISHED[i % NON_FINISHED.length]];
-    applyStep(s, step);
+    // Slots are ordered most-recent-event-first, so walk the last event ts
+    // backwards to put session 0 on slot 1. Staggering it (rather than letting
+    // every session land on the same Date.now()) is what makes the ordering
+    // deterministic instead of hostage to sub-millisecond write jitter.
+    applyStep(s, step, base - i * 100);
   }
   console.log(`drill: ${n} parallel sessions — pids=${owned.map((s) => s.pid).join(", ")}`);
   console.log(`drill: verify slot ordering, marquee on the long label, and overflow if N exceeds visible slots.`);

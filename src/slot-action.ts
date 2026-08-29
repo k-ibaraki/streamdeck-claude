@@ -7,10 +7,7 @@ import streamDeck, {
   WillDisappearEvent,
   type KeyAction,
 } from "@elgato/streamdeck";
-import { platform } from "node:os";
 import type { SessionOrigin } from "./sessions.js";
-import { focusWarpTabForCwd } from "./warp-focus.js";
-import { spawnCapture } from "./spawn-capture.js";
 
 /** Hold ≥ this long → wipe just this agent's event log (palier 1). */
 export const LONG_PRESS_MS = 500;
@@ -22,13 +19,18 @@ export const KILL_PRESS_MS = 3000;
 export interface SlotState {
   /** SVG already rendered last tick — used to skip redundant setImage calls. */
   lastSvg?: string;
-  /** What we copy to the clipboard when the key is short-pressed. */
-  clipboardPayload?: string;
   /** Bound session — used by long-press to wipe just this agent's event log. */
   sessionId?: string;
   origin?: SessionOrigin;
   /** Bound session pid — required to kill the process on a ≥3s hold. */
   pid?: number;
+  /** Bound session label, refreshed every tick by the render loop. */
+  label?: string;
+  /** Label captured at KeyDown. Slots are ordered by recency, so the entry
+   *  under a key can change between press and release, and the KILL ring has to
+   *  keep naming the session it is about to kill. (Its pid is already pinned in
+   *  onKeyDown's locals, so only the caption could drift.) */
+  pressedLabel?: string;
   /** Wall-clock ms du début d'arming (≥LONG_PRESS_MS tenu). undefined = pas en
    *  arming. Lu par le render-loop pour dessiner l'anneau "KILL". */
   killArmingSince?: number;
@@ -52,6 +54,7 @@ export class SlotAction extends SingletonAction {
   constructor(
     private readonly resetSlot: (sessionId: string, origin: SessionOrigin) => Promise<void>,
     private readonly killSlot: (pid: number, sessionId: string, origin: SessionOrigin) => Promise<void>,
+    private readonly advanceView: () => Promise<void>,
   ) {
     super();
   }
@@ -87,7 +90,7 @@ export class SlotAction extends SingletonAction {
 
   override onKeyDown(ev: KeyDownEvent): void {
     const slot = this.state.get(ev.action.id);
-    if (!slot?.clipboardPayload || !slot.sessionId || !slot.origin || slot.pid === undefined) {
+    if (!slot?.sessionId || !slot.origin || slot.pid === undefined) {
       // Empty slot — keep the "nothing to do here" feedback. No timer armed, so
       // KeyUp is also a no-op.
       void ev.action.showAlert();
@@ -97,6 +100,9 @@ export class SlotAction extends SingletonAction {
     const sessionId = slot.sessionId;
     const origin = slot.origin;
     const pid = slot.pid;
+    // Freeze what the key was showing at press time — the render loop rewrites
+    // `label` every tick as the ordering shifts under us.
+    slot.pressedLabel = slot.label;
     // Un agent bg n'est pas killable (daemon partagé) : on garde le palier 1
     // (wipe du log) mais ni l'anneau KILL ni le palier 2.
     const killable = slot.killable === true;
@@ -127,7 +133,7 @@ export class SlotAction extends SingletonAction {
     const wipeTimer = this.pressTimers.get(id);
     const killTimer = this.killTimers.get(id);
     if (wipeTimer) {
-      // Relâché avant 500ms → short press (copie + Warp). Annule tout.
+      // Relâché avant 500ms → short press (page la vue). Annule tout.
       clearTimeout(wipeTimer);
       this.pressTimers.delete(id);
       if (killTimer) {
@@ -150,20 +156,13 @@ export class SlotAction extends SingletonAction {
     // Relâché après 3s → kill déjà fired, no-op.
   }
 
+  /** Scrolls the deck one page down the session list. No showOk(): the green
+   *  overlay would sit on top of the very icon that is the confirmation. */
   private async runShortPress(ev: KeyUpEvent): Promise<void> {
-    const slot = this.state.get(ev.action.id);
-    const cwd = slot?.clipboardPayload;
-    if (!cwd) {
-      await ev.action.showAlert();
-      return;
-    }
     try {
-      await copyToClipboard(cwd);
-      const res = await focusWarpTabForCwd(cwd);
-      streamDeck.logger.info(`warp focus: ${res.reason} for cwd=${cwd}`);
-      await ev.action.showOk();
+      await this.advanceView();
     } catch (err) {
-      streamDeck.logger.error("clipboard copy failed", err);
+      streamDeck.logger.error("view advance failed", err);
       await ev.action.showAlert();
     }
   }
@@ -229,25 +228,4 @@ export class SlotAction extends SingletonAction {
   }
 }
 
-/**
- * Writes `text` to the host clipboard. Windows pipes to `clip.exe`; macOS to
- * `pbcopy`; Linux tries `wl-copy`, then `xclip`, then `xsel` (best-effort).
- */
-async function copyToClipboard(text: string): Promise<void> {
-  const p = platform();
-  const candidates: [string, string[]][] =
-    p === "win32" ? [["clip.exe", []]]
-    : p === "darwin" ? [["pbcopy", []]]
-    : [
-        ["wl-copy", []],
-        ["xclip", ["-selection", "clipboard"]],
-        ["xsel", ["--clipboard", "--input"]],
-      ];
-
-  for (const [cmd, args] of candidates) {
-    const r = await spawnCapture(cmd, args, { stdin: text });
-    if (!r.err && r.code === 0) return;
-  }
-  throw new Error("no clipboard tool succeeded");
-}
 

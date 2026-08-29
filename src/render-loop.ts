@@ -20,7 +20,9 @@ export async function renderAll(
   for (let i = 0; i < ordered.length; i++) {
     const action = ordered[i];
     const entry = entries[i];
-    const slotIndex = i + 1;
+    // Absolute position in the full session list, carried on the entry so the
+    // slow tick and the animation tick can't disagree about the badge.
+    const slotIndex = entry?.slotNumber ?? i + 1;
     const state = entry?.state ?? "empty";
     const label = entry?.session.label ?? "";
     const todos = entry?.session.todos;
@@ -36,7 +38,7 @@ export async function renderAll(
 
     const slotState = slotAction.getState(action.id);
     if (!slotState) continue;
-    slotState.clipboardPayload = entry?.session.cwd;
+    slotState.label = label;
     slotState.sessionId = entry?.session.sessionId;
     slotState.origin = entry?.session.origin;
     slotState.pid = entry?.session.pid;
@@ -48,7 +50,9 @@ export async function renderAll(
     if (slotState.killArmingSince !== undefined) {
       const elapsed = Date.now() - slotState.killArmingSince;
       const progress = Math.max(0, Math.min(1, elapsed / (KILL_PRESS_MS - LONG_PRESS_MS)));
-      const killSvg = renderKillArming({ slot: slotIndex, label, progress });
+      // Pinned caption: `label` above is whoever occupies the slot right now,
+      // which over a 3 s hold need not still be the session being killed.
+      const killSvg = renderKillArming({ slot: slotIndex, label: slotState.pressedLabel ?? label, progress });
       const killUrl = "data:image/svg+xml;base64," + Buffer.from(killSvg, "utf8").toString("base64");
       if (slotState.lastSvg !== killUrl) {
         slotState.lastSvg = killUrl;

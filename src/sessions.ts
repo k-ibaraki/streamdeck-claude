@@ -38,6 +38,7 @@ interface EventLogCacheEntry {
   mtimeMs: number;
   size: number;
   derived: DerivedState;
+  lastEventTs: number;
 }
 const eventLogCache = new Map<string, EventLogCacheEntry>();
 
@@ -88,6 +89,8 @@ export interface SessionInfo {
   errored: boolean;
   /** At least one subagent currently running. */
   subagentActive: boolean;
+  /** Event-log's own busy projection (in-turn). Fallback for `rawStatus`. */
+  busy: boolean;
   /** Snapshot of the last TodoWrite call's statuses; empty if none seen. */
   todos: TodoStatus[];
   origin: SessionOrigin;
@@ -99,6 +102,11 @@ export interface SessionInfo {
   bgWaitingFor?: string;
   /** mtime logique du json (ms) si le json l'expose. Utilisé pour la liveness des bg (fraîcheur). */
   updatedAt?: number;
+  /** Sort key for the display: ts of the newest hook event, falling back to
+   *  `startedAt` when the session has no event log yet. Most-recent-first
+   *  ordering is what keeps the session you're actually working in on slot 1
+   *  when there are more live sessions than keys on the deck. */
+  lastActivityAt: number;
 }
 
 const isPositiveInt = (x: unknown): x is number =>
@@ -146,8 +154,9 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
         const kind: "interactive" | "bg" = raw.kind === "bg" ? "bg" : "interactive";
 
         let derived: DerivedState = {
-          awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: false, subagentDepth: 0, todos: [],
+          awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: false, subagentDepth: 0, todos: [], busy: false,
         };
+        let lastEventTs = 0;
         // Un agent bg tourne en headless et ne nourrit pas le pipeline de hooks :
         // son json (status/waitingFor) est la source de vérité. On saute donc
         // entièrement la lecture/réduction de l'event-log pour les bg.
@@ -158,10 +167,14 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
             const cached = eventLogCache.get(eventsPath);
             if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
               derived = cached.derived;
+              lastEventTs = cached.lastEventTs;
             } else {
-              const text = await readFile(eventsPath, "utf8");
-              derived = reduceEvents(parseEventLog(text));
-              eventLogCache.set(eventsPath, { mtimeMs: st.mtimeMs, size: st.size, derived });
+              // Keep the parsed array: the reducer folds it away, but its last
+              // entry is the recency the display sorts on.
+              const events = parseEventLog(await readFile(eventsPath, "utf8"));
+              derived = reduceEvents(events);
+              lastEventTs = events.at(-1)?.ts ?? 0;
+              eventLogCache.set(eventsPath, { mtimeMs: st.mtimeMs, size: st.size, derived, lastEventTs });
             }
           } catch (err: unknown) {
             const code = (err as NodeJS.ErrnoException)?.code;
@@ -174,12 +187,20 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
           }
         }
 
+        const startedAt = typeof raw.startedAt === "number" ? raw.startedAt : 0;
+        // A bg agent never fires a hook, so its only freshness signal is the
+        // json's own updatedAt; everyone else rides the event log.
+        const lastActivityAt = kind === "bg"
+          ? (typeof raw.updatedAt === "number" ? raw.updatedAt : startedAt)
+          : (lastEventTs || startedAt);
+
         out.push({
           pid: raw.pid,
           sessionId: raw.sessionId,
           cwd: raw.cwd,
           label: raw.name?.trim() || basename(raw.cwd),
-          startedAt: typeof raw.startedAt === "number" ? raw.startedAt : 0,
+          startedAt,
+          lastActivityAt,
           rawStatus: status,
           kind,
           bgStatus: kind === "bg" ? raw.status : undefined,
@@ -191,6 +212,7 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
           awaitingPlan: derived.awaitingPlan,
           errored: derived.errored,
           subagentActive: derived.subagentDepth > 0,
+          busy: derived.busy,
           todos: derived.todos,
           origin: src.origin,
         });
@@ -329,10 +351,10 @@ export async function wipeAllEventLogs(): Promise<{ wiped: number; errors: strin
  *  awaiting_question > awaiting > subagent > working > idle. Plan approval ranks
  *  first among "needs you" states because users can sit on it longest; the more
  *  specific flags (permission, question) win over the generic catch-all so the
- *  distinct icon shows up. All awaiting* flags win over rawStatus="busy" since
- *  CC keeps the session marked busy while waiting — the event log is the source
- *  of truth for "needs input." Spurious idle-reminder Notifications fired after
- *  Stop are already filtered upstream in reduceEvents via its inTurn guard. */
+ *  distinct icon shows up. All awaiting* flags win over busy since CC keeps the
+ *  session marked busy while waiting — the event log is the source of truth for
+ *  "needs input." Spurious idle-reminder Notifications fired after Stop are
+ *  already filtered upstream in reduceEvents via its `busy` guard. */
 export function deriveState(s: SessionInfo, alive: boolean): SessionState {
   if (!alive) return "finished";
   if (s.kind === "bg") return deriveBgState(s);
@@ -341,8 +363,13 @@ export function deriveState(s: SessionInfo, alive: boolean): SessionState {
   if (s.awaitingPermission) return "awaiting_permission";
   if (s.awaitingQuestion) return "awaiting_question";
   if (s.awaiting) return "awaiting";
-  if (s.rawStatus === "busy" && s.subagentActive) return "subagent";
-  if (s.rawStatus === "busy") return "working";
+  // `status` is absent from <pid>.json on some entrypoints (observed on
+  // `entrypoint: "sdk-ts"`, i.e. every SDK/ACP-hosted session), which would pin
+  // those to "idle" for their whole lifetime. The event log's own in-turn
+  // projection covers that gap without changing behaviour where status exists.
+  const busy = s.rawStatus === "busy" || s.busy;
+  if (busy && s.subagentActive) return "subagent";
+  if (busy) return "working";
   return "idle";
 }
 

@@ -7,7 +7,7 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933.svg)](https://nodejs.org)
 [![Stream Deck](https://img.shields.io/badge/Stream%20Deck-%E2%89%A56.5-black.svg)](https://www.elgato.com/stream-deck)
 
-Each running `claude` CLI session lights up one key on your deck — project name, current state, animated when it's working, pulsing when it needs you. Press a key to copy the session's `cwd` to your clipboard and (on macOS / Windows) jump straight to the matching [Warp](https://www.warp.dev) tab.
+Each running `claude` CLI session lights up one key on your deck — project name, current state, animated when it's working, pulsing when it needs you. Sessions are ordered so whatever needs you sits on the first key; press a key to page through the rest when there are more sessions than keys.
 
 ## State gallery
 
@@ -25,8 +25,7 @@ Each running `claude` CLI session lights up one key on your deck — project nam
 ## Features
 
 - **Live per-session state** — sessions auto-fill the slots in start-time order; excess sessions beyond the slot count are simply not displayed.
-- **Press → copy `cwd`** to clipboard.
-- **Press → focus matching Warp tab** (macOS + Windows). See [`docs/warp-focus.md`](docs/warp-focus.md).
+- **Press → page through sessions.** Keys show a window onto the session list, ordered "needs you first, then most recently active" (see [`docs/architecture.md`](docs/architecture.md#slot-ordering)). A press scrolls that window one page down and wraps at the end; the corner badge is the absolute position, so you can tell 3-of-5 from 1-of-5. The view snaps back to the top on its own as soon as a session newly needs your input.
 - **Long-press (≥500 ms) → reset that session's state log** — useful if a stuck `awaiting` lingers.
 - **Setup key** — wipes all event logs and re-renders every slot in one press. Also self-checks the hook registration: if it's stale or missing (icons would silently break — e.g. a permission padlock that never clears), the key shows an amber **HOOKS** warning. Fix with `pnpm install:hook`, then reload.
 
@@ -38,7 +37,7 @@ Each running `claude` CLI session lights up one key on your deck — project nam
 | **Claude CLI host** | macOS, Linux, WSL, Windows-native — sessions on any of these show up |
 | **Stream Deck app on Linux** | Not supported — Elgato doesn't ship a Linux app |
 | **Node.js** | ≥ 20 (bundled into the plugin runtime by the Stream Deck app) |
-| **Terminal integration** | Warp tab focus on macOS + Windows; clipboard copy works with any terminal |
+| **Terminal integration** | none — a key press pages the deck instead (the Warp tab focus code is still in `src/warp-*.ts`, unwired) |
 
 ## Install
 
@@ -55,7 +54,7 @@ pnpm sd:validate
 # Quit + relaunch the Stream Deck app so it picks up the new plugin.
 ```
 
-For Warp tab focus, macOS will prompt to allow Stream Deck under *System Settings → Privacy & Security → Accessibility* on the first key press. Decline and the focus is silently skipped — clipboard copy still works.
+Nothing here needs Accessibility permission: the key press only changes what the plugin draws.
 
 ### WSL + Windows
 
@@ -73,7 +72,7 @@ pnpm sd:validate
 
 `WSL_DISTRO_NAME` is auto-detected and baked into the bundle at build time. To target a different distro, set it in your shell before `pnpm build`.
 
-For Warp tab focus on Windows, install `sqlite3` if you don't have it: `winget install SQLite.SQLite`.
+(`src/warp-*.ts` needs `sqlite3` on Windows, but nothing calls it while the short press is bound to paging.)
 
 After linking, **quit + relaunch the Stream Deck app** (right-click tray icon → Quit). The "Claude Sessions" category appears in the action list.
 
@@ -96,7 +95,7 @@ Logs land at `%APPDATA%\Elgato\StreamDeck\Plugins\com.julien.claudesessions.sdPl
 
 - [`docs/architecture.md`](docs/architecture.md) — session discovery, hook event → state machine, path/UNC resolution, render pipeline
 - [`docs/development.md`](docs/development.md) — full pnpm scripts, end-to-end verification, tweaks
-- [`docs/warp-focus.md`](docs/warp-focus.md) — Warp focus internals, per-OS quirks, failure modes
+- [`docs/warp-focus.md`](docs/warp-focus.md) — Warp focus internals, per-OS quirks, failure modes. **Describes a path nothing in `src/` currently reaches**: the short press was rebound to paging, so `src/warp-*.ts` is dead code kept for reference.
 
 ## License
 

@@ -19,9 +19,7 @@ export interface SessionEvent {
   todos?: TodoStatus[];
 }
 
-/** What the icon needs, derived from the event log. The session's busy/idle
- *  flag still comes from the session JSON's `status` field — that's CC's own
- *  state, not ours to derive. */
+/** What the icon needs, derived from the event log. */
 export interface DerivedState {
   /** Generic in-turn Notification (non-permission). Catch-all for elicitation /
    *  unknown notifType values so the icon still flags "needs input." */
@@ -37,28 +35,24 @@ export interface DerivedState {
   subagentDepth: number;
   /** Most recent TodoWrite snapshot; empty until the agent calls TodoWrite. */
   todos: TodoStatus[];
+  /** True between UserPromptSubmit and Stop/StopFailure. Two jobs: it tells a
+   *  real permission/input prompt (Notification fired mid-turn — CC actually
+   *  needs the user) from an idle reminder (Notification fired ~60 s after Stop
+   *  — CC's bell-like "you've gone afk" nudge), and it stands in for CC's own
+   *  busy flag, which is absent from `<pid>.json` on some entrypoints
+   *  (observed on `entrypoint: "sdk-ts"`). */
+  busy: boolean;
 }
 
-/** Internal accumulator: same as DerivedState plus `inTurn`, which is true
- *  between UserPromptSubmit and Stop/StopFailure. Used to tell apart a real
- *  permission/input prompt (Notification fired mid-turn — CC actually needs
- *  the user) from an idle reminder (Notification fired ~60s after Stop —
- *  CC's bell-like "you've gone afk" nudge, not an actual question). */
-interface ReducerState extends DerivedState {
-  inTurn: boolean;
-}
-
-const ZERO: ReducerState = { awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: false, subagentDepth: 0, todos: [], inTurn: false };
+const ZERO: DerivedState = { awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: false, subagentDepth: 0, todos: [], busy: false };
 
 export function reduceEvents(events: readonly SessionEvent[]): DerivedState {
   let state = ZERO;
   for (const ev of events) state = applyEvent(state, ev);
-  // Strip the internal flag — callers only get the public projection.
-  const { inTurn: _inTurn, ...derived } = state;
-  return derived;
+  return state;
 }
 
-function applyEvent(state: ReducerState, ev: SessionEvent): ReducerState {
+function applyEvent(state: DerivedState, ev: SessionEvent): DerivedState {
   switch (ev.event) {
     case "SessionStart":
     case "SessionEnd":
@@ -69,7 +63,7 @@ function applyEvent(state: ReducerState, ev: SessionEvent): ReducerState {
       // subagentDepth here (and at Stop) keeps a missed SubagentStop — a
       // subagent killed or a hook that didn't fire — from leaking across the
       // turn boundary and stranding the session on the "subagent" icon.
-      return { ...state, inTurn: true, awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: false, subagentDepth: 0 };
+      return { ...state, busy: true, awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: false, subagentDepth: 0 };
 
     case "Notification":
       // Only an in-turn Notification is a real prompt to the user. After Stop,
@@ -78,7 +72,7 @@ function applyEvent(state: ReducerState, ev: SessionEvent): ReducerState {
       // Split permission_prompt (CC asking to use a tool — gets its own padlock
       // icon) from anything else in-turn (elicitation_dialog / older logs with
       // no notifType — generic "needs input" awaiting).
-      if (!state.inTurn) return state;
+      if (!state.busy) return state;
       return ev.notifType === "permission_prompt"
         ? { ...state, awaitingPermission: true }
         : { ...state, awaiting: true };
@@ -108,10 +102,10 @@ function applyEvent(state: ReducerState, ev: SessionEvent): ReducerState {
     case "Stop":
       // A subagent cannot outlive the turn that spawned it, so depth is 0 once
       // the main turn stops — reset it to absorb any unmatched SubagentStart.
-      return { ...state, inTurn: false, awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, subagentDepth: 0 };
+      return { ...state, busy: false, awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, subagentDepth: 0 };
 
     case "StopFailure":
-      return { ...state, inTurn: false, awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: true, subagentDepth: 0 };
+      return { ...state, busy: false, awaiting: false, awaitingPermission: false, awaitingQuestion: false, awaitingPlan: false, errored: true, subagentDepth: 0 };
 
     case "SubagentStart":
       return { ...state, subagentDepth: state.subagentDepth + 1 };

@@ -4,7 +4,7 @@ How the plugin discovers Claude Code sessions, derives state, and renders icons.
 
 ## Session discovery
 
-Claude Code drops one JSON file per running CLI session under `~/.claude/sessions/<pid>.json`. The plugin reads that directory once per second, batches a `kill -0 <pid>` check to filter out stale files, sorts the live sessions by `startedAt`, and renders an SVG per Stream Deck slot via `setImage`.
+Claude Code drops one JSON file per running CLI session under `~/.claude/sessions/<pid>.json`. The plugin reads that directory once per second, batches a `kill -0 <pid>` check to filter out stale files, sorts the live sessions most-recent-event-first, and renders an SVG per Stream Deck slot via `setImage`.
 
 When the plugin runs on a Windows host, two session directories are scanned in parallel:
 
@@ -12,6 +12,31 @@ When the plugin runs on a Windows host, two session directories are scanned in p
 - Windows-native sessions, read at `%USERPROFILE%\.claude\sessions`. PIDs are checked with one `tasklist.exe /NH /FO CSV` dump intersected in-process. (Per-PID `/FI "PID eq N"` filters AND together in tasklist — they don't OR — so per-PID filtering is impossible; one big dump is cheaper than N spawns.)
 
 Each `SessionInfo` carries an `origin: "wsl" | "windows"` tag so the right liveness check is applied. A 10s `CACHE_FALLBACK_MS` absorbs transient empty/errored spawns without flickering keys to "finished".
+
+### Slot ordering
+
+There are routinely more live sessions than keys on the deck — an editor hosting Claude Code over ACP keeps one `claude` process per open thread, restored ones included — so the order decides what you actually get to see. Two groups:
+
+1. **Blocked on you.** `awaiting_plan`, `awaiting_permission`, `awaiting_question`, `awaiting`, `error`, `bg_awaiting_permission`, `bg_awaiting` (`ATTENTION_STATES` in `src/state-tracker.ts`).
+2. **Everything else.**
+
+Within each group, `lastActivityAt` descending — the `ts` of the newest line in the session's event log, falling back to `startedAt` when there is no log yet, and to the json's `updatedAt` for bg agents, which never fire hooks.
+
+The group split is not cosmetic. A session's event log stops growing the instant it starts waiting, while a working session appends a `PreToolUse`/`PostToolUse` pair every second or so; on recency alone the working session would always bury the one that needs you. Answering a prompt is seamless in the other direction: clearing the flag drops the session into group 2, where its now-newest event holds it in the same place.
+
+A session promoted into `recentlyFinished` gets its `lastActivityAt` re-stamped to the moment of death. Without that the 3s green check would sink: `SessionEnd`'s hook unlinks the event log, so a cleanly-exited session falls back to `startedAt` — hours old, and off the bottom of a short deck.
+
+Ties break on `startedAt` descending, then `pid` ascending.
+
+### The view window
+
+There are usually more sessions than keys, so the keys render a *window* onto the sorted list rather than its head. `createStateTracker` owns `viewOffset`; a short press calls `advanceView()`, which pages down by the visible slot count and wraps at the end. Each entry in the sliced window carries its absolute `slotNumber`, which is what the corner badge draws — the badge is the only feedback that a press landed, which is also why the short press does *not* call `showOk()` (the green overlay would cover the icon it is confirming).
+
+The window resets to 0 when a session **newly** enters an `ATTENTION_STATES` state. Edge-triggered, not level-triggered: a session that simply keeps waiting must not re-snap the view every tick, because being able to page past it is exactly what you want while it waits. It also resets when `viewOffset` would fall past the end of a shrinking list. Nothing else moves it — page away from the top and the deck stays there until something needs you.
+
+`tick`'s log line carries `view=<offset>/<total>`, and `maybeLog` dedups on the whole string, so the log records exactly the ticks where the window moved. The explicit tiebreak is load-bearing: sessions restored in one batch share a `SessionStart` ts to the millisecond, and relying on sort stability there would hand the order to `readOneSource`'s `Promise.all` push order, which varies per tick and would repaint every key for nothing.
+
+Because slot identity can now change between two ticks, a key press pins the cwd and label it was showing at `KeyDown` (`SlotState.pressedCwd` / `pressedLabel`); the kill target's pid was already captured in `onKeyDown`'s locals.
 
 ## State derivation
 
@@ -22,14 +47,14 @@ Every registered Claude Code hook event appends one JSON line to `~/.claude/sess
 | `SessionStart` | truncates the log + resets state |
 | `Notification[permission_prompt]` | sets `awaitingPermission` (only in-turn) |
 | `Notification[*]` other in-turn types | sets `awaiting` (catch-all for `elicitation_dialog` / unknown / older logs) |
-| `Notification` post-Stop (`idle_prompt`) | ignored — filtered by reducer's `inTurn` guard |
-| `Stop` | clears `awaiting` / `awaitingPermission` / `awaitingQuestion` / `awaitingPlan` |
+| `Notification` post-Stop (`idle_prompt`) | ignored — filtered by reducer's `busy` guard |
+| `Stop` | clears `busy` + `awaiting` / `awaitingPermission` / `awaitingQuestion` / `awaitingPlan` |
 | `PreToolUse[ExitPlanMode]` | sets `awaitingPlan` |
 | `PostToolUse[ExitPlanMode]` | clears `awaitingPlan` |
 | `PreToolUse[AskUserQuestion]` | sets `awaitingQuestion` |
 | `PostToolUse[AskUserQuestion]` | clears `awaitingQuestion` |
 | `StopFailure` | sets `errored` |
-| `UserPromptSubmit` | clears all `awaiting*` flags + `errored` |
+| `UserPromptSubmit` | sets `busy`, clears all `awaiting*` flags + `errored` |
 | `SubagentStart` / `SubagentStop` | bumps `subagentDepth` ±1 |
 | `SessionEnd` | unlinks the log |
 
@@ -40,6 +65,8 @@ The `notification_type` discrimination requires hooks to capture CC's `notificat
 The catch-all matcher is load-bearing: `awaitingPermission` is cleared by *any* `PreToolUse`/`PostToolUse` mid-turn (`session-events.ts`), so a permission padlock only clears once a normal tool runs after approval. If a stale `settings.json` registers these tool-specific (the pre-`9dc606c` `ExitPlanMode`/`TodoWrite` matchers) instead, `PostToolUse[Bash]` never fires and the padlock stays stuck until the turn ends. `src/hook-check.ts` guards against exactly this: it verifies the catch-all registration at startup (and on Setup-key appear) and surfaces a warning rather than letting the plugin degrade silently.
 
 To add a new state: register the event in `scripts/install-hook.sh`, add a case in `src/session-events.ts`, and an entry in the `STATES` registry at `src/icons/states.ts`. State priority (see `deriveState()` in `src/sessions.ts`): `finished` > `error` > `awaiting_plan` > `awaiting_permission` > `awaiting_question` > `awaiting` > `subagent` > `working` > `idle`. All `awaiting*` flags win over `busy` because CC keeps the session marked busy while waiting on the user.
+
+`busy` itself is `rawStatus === "busy"` (the json's own `status` field) OR the reducer's in-turn projection. The fallback matters because `status` is absent from `<pid>.json` on some entrypoints — observed on `entrypoint: "sdk-ts"`, i.e. every SDK/ACP-hosted session — which would otherwise pin those sessions to the `idle` icon for their whole lifetime.
 
 ## Path / environment resolution
 
