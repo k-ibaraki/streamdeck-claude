@@ -8,8 +8,8 @@ export const BORDER_STROKE = 5;    // user requested +2 over previous 3px
 export const VIEWPORT_X = 10;
 export const VIEWPORT_W = 144 - 2 * VIEWPORT_X;
 // Corner badges (slot number right, bg/suffix left) get their own band at the
-// very top: the label below marquees across the full viewport width when it
-// overflows, so anything sharing its baseline band would be scrolled over.
+// very top: the truncated label below is centered and can still span nearly the
+// full viewport width, so anything sharing its baseline would collide.
 export const BADGE_BASELINE = 19;
 export const BADGE_FONT = 10;
 export const TOP_BASELINE = 35;

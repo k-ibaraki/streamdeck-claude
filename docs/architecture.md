@@ -85,7 +85,7 @@ The plugin runs inside the Stream Deck app on Windows where neither `HOME` nor `
 `src/plugin.ts` runs two intervals against the same `state-tracker.ts` instance:
 
 - **Slow tick (1s):** `tracker.tick()` re-reads sessions + liveness + event logs, computes the sorted `DisplayEntry[]`, and `renderAll()`s every slot. It then calls `renderUsage()` for the plan-usage keys — a no-op that costs nothing when none of them are on the deck. Re-entrancy guarded by `slowTickRunning`.
-- **Animation tick (120ms):** advances `frame`, then renders only if `tracker.needsAnimation()` is true (any animated motif OR a marquee-overflowing label). Same guard pattern.
+- **Animation tick (120ms):** advances `frame`, then renders only if `tracker.needsAnimation()` is true (an animated motif, or a pulsing in-progress todo — text never moves). Same guard pattern.
 
 `createStateTracker()` owns the cross-tick bookkeeping: `prevLiveIds` (so a session is promoted to `finished` only when it was alive *last tick* — stale junk files from previous CC runs never appear) and `recentlyFinished` (carry-over for `FINISHED_TTL_MS = 3000`ms after death).
 
@@ -93,7 +93,7 @@ The plugin runs inside the Stream Deck app on Windows where neither `HOME` nor `
 
 `SlotAction.orderedActions()` sorts visible action instances by Stream Deck `(row, column)` — that's what defines slot 1..N. `renderAll()` zips slots with `DisplayEntry[]`, calls `renderIcon()` to produce an SVG, base64-encodes a `data:image/svg+xml;base64,…` URL, and only calls `setImage` when the URL changed (per-slot dedup via `slotState.lastSvg`).
 
-A key shows one meaning per line: the repo name on top (or the session name the user pinned, when `nameSource` isn't `"derived"`), the current branch below — a short SHA when HEAD is detached, nothing at all outside a repo. Both scroll when they overflow the 124px viewport. Claude Code's own derived name is `<cwd basename>-<suffix>`; the suffix is demoted to a top-left badge, sharing that corner with the `bg` tag, because it's the only thing distinguishing two sessions running in the same worktree.
+A key shows one meaning per line: the repo name on top (or the session name the user pinned, when `nameSource` isn't `"derived"`), the current branch below — a short SHA when HEAD is detached, nothing at all outside a repo. Both are truncated with an ellipsis when they overflow the 124px viewport — nothing scrolls, because a key is glanced at rather than read and a moving line makes you wait for the part you need. `overflows()` keeps the threshold the old marquee used, so a label that rendered statically before still does; `fitText()` then cuts to 90% of the band, since `approxWidth()` is a per-char estimate that underruns on wide glyphs. A clip on each line is the backstop for that estimate: on a pathological string (`WWWW…`) the text is cut at both ends and the ellipsis falls off-screen, which is the intended degradation. Claude Code's own derived name is `<cwd basename>-<suffix>`; the suffix is demoted to a top-left badge, sharing that corner with the `bg` tag, because it's the only thing distinguishing two sessions running in the same worktree.
 
 Repo and branch come from `src/git-info.ts`, which reads git's plumbing (`.git/HEAD`, plus `gitdir:`/`commondir` for linked worktrees) instead of spawning `git` — the slow tick runs once a second across every live session. Both the cwd→repo resolution and the parsed HEAD are memoised, the latter gated on (mtime, size) like the caches in `sessions.ts`, and pruned against the live session set. Every path first goes through `localPathForOrigin()` in `env.ts`: a WSL session records `/home/u/proj`, which the Windows-side plugin can only open as `\\wsl.localhost\<distro>\home\u\proj`. Anything unreachable degrades to "no branch line" rather than throwing.
 
@@ -101,7 +101,7 @@ Icon code is split per concern across `src/icons/`:
 - `theme.ts` — palette / dimension constants
 - `motifs.ts` — animated SVG fragments per state
 - `states.ts` — the single `STATES` registry mapping each `SessionState` to palette + motif + animation flag
-- `text.ts` — marquee + width estimation
+- `text.ts` — width estimation + truncation
 - `render.ts` — composes the final SVG
 
 The plan-usage keys are a second, much simpler path through the same idea:

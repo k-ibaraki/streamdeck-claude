@@ -16,7 +16,7 @@ type MotifFn = (frame: number, color: string) => string;
 
 interface StateDef {
   palette: Palette;
-  /** True if the motif itself uses `frame` (independent of marquee on labels). */
+  /** True if the motif itself uses `frame` (labels never animate — they truncate). */
   animated: boolean;
   /** When true, render.ts overlays the accent color on top of `bg` at a frame-driven
    *  opacity, so the whole tile pulses to "full colour" while the user is being

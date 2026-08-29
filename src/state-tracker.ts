@@ -181,12 +181,13 @@ export function createStateTracker() {
   }
 
   /**
-   * Whether anything on screen needs frame-to-frame redraw (animated motif
-   * OR a marquee-overflowing label). Lets the animation loop short-circuit
-   * the render call when nothing would actually change.
+   * Whether anything on screen needs frame-to-frame redraw (animated motif or a
+   * pulsing in-progress todo). Lets the animation loop short-circuit the render
+   * call when nothing would actually change — which, with labels truncated
+   * rather than scrolled, is most of the time.
    */
   function needsAnimation(): boolean {
-    return visibleEntries.some((e) => iconNeedsAnimation(e.state, e.session.label, e.session.branch, e.session.todos));
+    return visibleEntries.some((e) => iconNeedsAnimation(e.state, e.session.todos));
   }
 
   return { tick, getEntries, needsAnimation, advanceView };
