@@ -32,10 +32,16 @@ import { invalidateUsageCache, readUsageSnapshot } from "./usage.js";
 const CC_WRITE_FLOOR_MS = 5 * 60 * 1000;
 const REFRESH_WHEN_OLDER_THAN_MS = CC_WRITE_FLOOR_MS + 30_000;
 /** `claude -p "/usage"` measured at ~3s; well clear of that, and bounded so a
- *  wedged child can never pile up behind the interval. */
+ *  wedged child can never pile up behind the tick. */
 const SPAWN_TIMEOUT_MS = 30_000;
 
 let running = false;
+/** When we last actually spawned. The snapshot's own age cannot carry this on
+ *  its own: if there is no snapshot at all, or the child leaves it untouched,
+ *  the age gate never closes and the tick would relaunch the moment the last
+ *  child exited — a spawn every ~3s, forever, and silently, since warnOnce()
+ *  only speaks the first time. */
+let lastAttemptMs = 0;
 /** Only warn once per failure reason — this is driven off the tick, and a
  *  missing `claude` on PATH would otherwise fill the log. */
 let lastFailure = "";
@@ -58,12 +64,17 @@ function warnOnce(message: string): void {
  */
 export async function refreshUsageCache(): Promise<boolean> {
   if (running) return false;
-  const before = (await readUsageSnapshot())?.fetchedAtMs;
-  if (before !== undefined && Date.now() - before < REFRESH_WHEN_OLDER_THAN_MS) {
-    return false;
-  }
+  if (Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) return false;
+  // Claimed before the first await, not after: the tick and a key press can
+  // both arrive inside one turn of the event loop, and a gap here would let
+  // both through and spawn two children.
   running = true;
   try {
+    const before = (await readUsageSnapshot())?.fetchedAtMs;
+    if (before !== undefined && Date.now() - before < REFRESH_WHEN_OLDER_THAN_MS) {
+      return false;
+    }
+    lastAttemptMs = Date.now();
     await mkdir(USAGE_REFRESH_DIR, { recursive: true });
     const r = await spawnCapture("claude", ["-p", "/usage"], {
       cwd: USAGE_REFRESH_DIR,

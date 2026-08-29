@@ -90,6 +90,12 @@ an empty list and skips, so the first refresh would be a whole cycle late. And t
 does not await it: the child takes ~3s, which would hold `slowTickRunning` and freeze
 every session key for that long.
 
+Both gates matter: the snapshot's age decides whether a refresh is *worth* asking
+for, and the time of the last spawn decides whether we are *allowed* to ask. Without
+the second, an account with no snapshot at all — or a child that exits 0 without
+refreshing — leaves the age gate permanently open, and the tick relaunches the moment
+the previous child exits: a spawn every ~3s, forever.
+
 Exit code 0 is not proof of a refresh. `claude -p "/usage"` returns 0 even when it never
 reaches the API (reproduced with a stripped environment: "Total duration (API): 0s",
 snapshot untouched). Since we only spawn past Claude Code's rewrite floor, a
