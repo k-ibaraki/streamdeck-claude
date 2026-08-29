@@ -1,11 +1,7 @@
-import { VIEWPORT_X, VIEWPORT_W } from "./theme.js";
+import { VIEWPORT_W, VIEWPORT_X } from "./theme.js";
 
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const xmlEscape = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
-
-// Marquee timing.
-const MARQUEE_PX_PER_S = 30;       // scroll speed
-const MARQUEE_GAP = 28;            // gap between text repeats
 
 /** Approximate rendered width for a proportional sans/mono mix at the given px size. */
 export function approxWidth(text: string, fontSize: number): number {
@@ -13,40 +9,55 @@ export function approxWidth(text: string, fontSize: number): number {
   return text.length * fontSize * 0.58;
 }
 
-/** Returns the SVG fragment for one centered/marqueed line. `idSuffix` must be unique
- *  per call within the same icon (the SVG <clipPath> ids are scoped to that document). */
+/** Whether `text` is too wide for the key's text band. Single source of truth —
+ *  `fitText` asks the same question, so the two can't disagree. */
+export const overflows = (text: string, fontSize: number) =>
+  approxWidth(text, fontSize) > VIEWPORT_W;
+
+const ELLIPSIS = "…";
+
+/** Where we aim when cutting — deliberately under the band. `overflows` keeps
+ *  the old marquee threshold so nothing that rendered statically before starts
+ *  getting cut, but once we've decided to cut there's no reason to stop flush
+ *  against the border: `approxWidth` underestimates wide glyphs, and a truncated
+ *  line touching the edge reads as broken rather than shortened. */
+const CUT_TARGET = VIEWPORT_W * 0.9;
+
+/** Cuts `text` down to what fits, appending an ellipsis when anything was
+ *  dropped. Deliberately static: a key is glanced at, not read, and a scrolling
+ *  line makes you wait for the part you need. A stable truncated string is
+ *  legible in the half-second you actually look at the deck. */
+export function fitText(text: string, fontSize: number): string {
+  if (!overflows(text, fontSize)) return text;
+  let n = text.length;
+  while (n > 0 && approxWidth(text.slice(0, n) + ELLIPSIS, fontSize) > CUT_TARGET) n--;
+  return text.slice(0, n) + ELLIPSIS;
+}
+
+/** Returns the SVG fragment for one centered line, truncated to fit and clipped
+ *  to the text band. The clip is the backstop for `approxWidth` being a per-char
+ *  estimate: a string of unusually wide glyphs measures narrower than it renders,
+ *  and would otherwise spill past the border. When it fires the text is cut at
+ *  both ends (the line is centered) and the ellipsis goes off-screen — that is
+ *  the intended degradation, not a bug.
+ *
+ *  `clipId` must be unique within the SVG this fragment lands in. Each key is its
+ *  own standalone document, so plain `ct`/`cb` are enough. */
 export function textLine(opts: {
   text: string;
   baseline: number;
   fontSize: number;
   weight: string;
   color: string;
-  now: number;
-  idSuffix: string;
+  clipId: string;
 }): string {
-  const { text, baseline, fontSize, weight, color, now, idSuffix } = opts;
+  const { baseline, fontSize, weight, color, clipId } = opts;
+  const text = fitText(opts.text, fontSize);
   if (!text) return "";
   const fontFamily = "-apple-system,Segoe UI,Roboto,sans-serif";
-  const w = approxWidth(text, fontSize);
-  const fits = w <= VIEWPORT_W;
-
-  if (fits) {
-    return `<text x="72" y="${baseline}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="${weight}" fill="${color}" text-anchor="middle">${xmlEscape(text)}</text>`;
-  }
-
-  // Marquee: continuous left scroll with gap-padded repeat.
-  const stripWidth = w + MARQUEE_GAP;
-  const period = (stripWidth / MARQUEE_PX_PER_S) * 1000;
-  const offset = ((now % period) / period) * stripWidth;
-  const startX = VIEWPORT_X - offset;
-  const clipId = `c${idSuffix}`;
-  // Vertical clip box covers cap-top to descender.
+  // Box covers cap-top to descender.
   const clipY = baseline - Math.round(fontSize * 0.85);
   const clipH = Math.round(fontSize * 1.2);
-
   return `<defs><clipPath id="${clipId}"><rect x="${VIEWPORT_X}" y="${clipY}" width="${VIEWPORT_W}" height="${clipH}"/></clipPath></defs>
-<g clip-path="url(#${clipId})" font-family="${fontFamily}" font-size="${fontSize}" font-weight="${weight}" fill="${color}">
-  <text x="${startX.toFixed(2)}" y="${baseline}">${xmlEscape(text)}</text>
-  <text x="${(startX + stripWidth).toFixed(2)}" y="${baseline}">${xmlEscape(text)}</text>
-</g>`;
+<text clip-path="url(#${clipId})" x="72" y="${baseline}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="${weight}" fill="${color}" text-anchor="middle">${xmlEscape(text)}</text>`;
 }

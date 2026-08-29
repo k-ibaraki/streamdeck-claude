@@ -10,9 +10,8 @@ import {
   MOTIF_DY,
   TOP_BASELINE,
   TOP_FONT,
-  VIEWPORT_W,
 } from "./theme.js";
-import { approxWidth, textLine, xmlEscape } from "./text.js";
+import { textLine, xmlEscape } from "./text.js";
 import { STATES, isBgState, type SessionState } from "./states.js";
 import { ANIMATION_FRAMES } from "./motifs.js";
 import type { TodoStatus } from "../session-events.js";
@@ -35,8 +34,6 @@ export interface IconOptions {
   badge?: string;
   /** Animation frame, 0..ANIMATION_FRAMES-1. */
   frame?: number;
-  /** Wall-clock ms; used for marquee. Defaults to Date.now() if omitted. */
-  now?: number;
   /** TodoWrite snapshot — renders a left-edge progress column when non-empty. */
   todos?: TodoStatus[];
 }
@@ -90,13 +87,12 @@ function renderTopLeftBadge(text: string, accent: string): string {
   return `<text x="16" y="${BADGE_BASELINE}" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="${BADGE_FONT}" font-weight="700" fill="${accent}" opacity="0.8" text-anchor="start">${xmlEscape(text)}</text>`;
 }
 
-export function renderIcon({ state, slot, label, branch, badge, frame = 0, now, todos }: IconOptions): string {
-  const t = now ?? Date.now();
+export function renderIcon({ state, slot, label, branch, badge, frame = 0, todos }: IconOptions): string {
   const { bg, accent, label: labelColor } = STATES[state].palette;
   const slotText = state === "empty" ? "" : String(slot);
   const isEmpty = state === "empty";
   // One meaning per line: which project on top, which branch below. Values too
-  // wide for the key scroll (see textLine) instead of being split or clipped.
+  // wide for the key are truncated with an ellipsis (see fitText).
   const top = isEmpty ? "free slot" : label;
   const bottom = isEmpty ? "" : branch ?? "";
 
@@ -106,8 +102,7 @@ export function renderIcon({ state, slot, label, branch, badge, frame = 0, now, 
     fontSize: TOP_FONT,
     weight: "700",
     color: accent,
-    now: t,
-    idSuffix: `t${slot}`,
+    clipId: "ct",
   });
 
   const bottomSvg = bottom
@@ -117,8 +112,7 @@ export function renderIcon({ state, slot, label, branch, badge, frame = 0, now, 
         fontSize: BOTTOM_FONT,
         weight: "600",
         color: labelColor,
-        now: t,
-        idSuffix: `b${slot}`,
+        clipId: "cb",
       })
     : "";
 
@@ -155,22 +149,12 @@ ${todoColumn}
 </svg>`;
 }
 
-/** True when the icon's visual depends on `frame` or `now` and must be re-rendered often. */
-export function iconNeedsAnimation(
-  state: SessionState,
-  label: string,
-  branch?: string,
-  todos?: readonly TodoStatus[],
-): boolean {
+/** True when the icon's visual depends on `frame` and must be re-rendered often.
+ *  Text never qualifies: labels are truncated, not scrolled, so a static state
+ *  with a long name stays genuinely static. */
+export function iconNeedsAnimation(state: SessionState, todos?: readonly TodoStatus[]): boolean {
   if (STATES[state].animated) return true;
-  if (todos && todos.some((s) => s === "in_progress")) return true;
-  // Marquee may apply to either line even on static states. Must mirror the
-  // line split renderIcon uses, or the animation loop stops feeding a scroll
-  // that's actually on screen.
-  const top = state === "empty" ? "free slot" : label;
-  if (approxWidth(top, TOP_FONT) > VIEWPORT_W) return true;
-  if (state !== "empty" && branch && approxWidth(branch, BOTTOM_FONT) > VIEWPORT_W) return true;
-  return false;
+  return todos !== undefined && todos.some((s) => s === "in_progress");
 }
 
 /** True when the icon's motif uses `frame` (independent of marquee). */
@@ -190,15 +174,12 @@ export interface KillArmingOptions {
   badge?: string;
   /** 0..1 — fraction du hold écoulée entre LONG_PRESS_MS et KILL_PRESS_MS. */
   progress: number;
-  /** Wall-clock ms; used for marquee. Defaults to Date.now() if omitted. */
-  now?: number;
 }
 
 /** Tile rouge avec un anneau de progression + label "KILL", affichée pendant
  *  que l'utilisateur maintient la touche entre 500ms et 3s. À 1.0 l'anneau est
  *  plein → le kill part. Relâcher avant ramène le slot à son état normal. */
-export function renderKillArming({ slot, label, badge, progress, now }: KillArmingOptions): string {
-  const t = now ?? Date.now();
+export function renderKillArming({ slot, label, badge, progress }: KillArmingOptions): string {
   const p = Math.max(0, Math.min(1, progress));
   const cx = 72;
   const cy = 80;
@@ -212,8 +193,7 @@ export function renderKillArming({ slot, label, badge, progress, now }: KillArmi
     fontSize: TOP_FONT,
     weight: "700",
     color: KILL_ACCENT,
-    now: t,
-    idSuffix: `k${slot}`,
+    clipId: "ct",
   });
   const slotBadge = renderSlotBadge(String(slot), KILL_ACCENT);
   const cornerBadge = badge ? renderTopLeftBadge(badge, KILL_ACCENT) : "";
