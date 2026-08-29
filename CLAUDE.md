@@ -77,10 +77,24 @@ only the usage slice matters.
 to *see* usage (startup, `/usage`, the status line, a limit warning); an SDK/GUI-hosted
 session asks for none of those, and the snapshot was measured sitting untouched through
 25+ minutes of continuous work. So `usage-refresh.ts` asks on our behalf: it spawns
-`claude -p "/usage"` every 5½ minutes, which runs the slash command locally (no model
-turn, ~3s) and writes the refreshed snapshot back. The 5½ is deliberate — Claude Code
-refuses to rewrite a snapshot under 5 minutes old, and firing on exactly 5 would
-no-op every other round. It only runs when a usage key is actually on the deck.
+`claude -p "/usage"` whenever the snapshot is older than 5½ minutes, which runs the
+slash command locally (no model turn, ~3s) and writes the refreshed snapshot back.
+The 5½ is deliberate — Claude Code refuses to rewrite a snapshot under 5 minutes old,
+and landing exactly on that floor would no-op every other round. It only runs when a
+usage key is actually on the deck.
+
+Two things about *how* it is driven. It rides the slow tick rather than owning an
+interval, because action instances are filled in by `willAppear`, which arrives after
+`connect()` resolves — anything checking "is a usage key on the deck?" at startup reads
+an empty list and skips, so the first refresh would be a whole cycle late. And the tick
+does not await it: the child takes ~3s, which would hold `slowTickRunning` and freeze
+every session key for that long.
+
+Exit code 0 is not proof of a refresh. `claude -p "/usage"` returns 0 even when it never
+reaches the API (reproduced with a stripped environment: "Total duration (API): 0s",
+snapshot untouched). Since we only spawn past Claude Code's rewrite floor, a
+`fetchedAtMs` that has not moved means the refresh did not happen — that is the success
+signal, and it warns instead of leaving the keys on a frozen number in silence.
 
 The refresher's own session file is the catch: the CLI writes it as
 `kind:"interactive"` like any other, and with `lastActivityAt` of "now" it would sort

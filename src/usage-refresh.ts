@@ -2,6 +2,7 @@ import streamDeck from "@elgato/streamdeck";
 import { mkdir } from "node:fs/promises";
 import { USAGE_REFRESH_DIR } from "./env.js";
 import { spawnCapture } from "./spawn-capture.js";
+import { invalidateUsageCache, readUsageSnapshot } from "./usage.js";
 
 /**
  * Keeps `~/.claude.json` → `cachedUsageUtilization` fresh.
@@ -23,31 +24,42 @@ import { spawnCapture } from "./spawn-capture.js";
  * lets `sessions.ts` drop it instead of flashing a slot on the deck.
  */
 
-/** Claude Code refuses to rewrite the snapshot while it is under 5 minutes old.
- *  Firing on exactly 5 would race that floor and silently no-op every other
- *  round, stretching the effective refresh to 10 minutes — hence the margin. */
+/** Claude Code refuses to rewrite the snapshot while it is under 5 minutes old,
+ *  so asking below that can only waste the ~3s the child costs. The margin on
+ *  top keeps us clear of the floor: landing exactly on it would no-op, and
+ *  because a no-op is indistinguishable from a real refresh at the call site,
+ *  it would also make the staleness check below fire spurious warnings. */
 const CC_WRITE_FLOOR_MS = 5 * 60 * 1000;
-export const USAGE_REFRESH_MS = CC_WRITE_FLOOR_MS + 30_000;
-/** Same floor, applied before spawning: below it the child cannot change
- *  anything, so there is nothing to gain from the 3 seconds it costs. */
-const SKIP_IF_FRESHER_THAN_MS = CC_WRITE_FLOOR_MS;
+const REFRESH_WHEN_OLDER_THAN_MS = CC_WRITE_FLOOR_MS + 30_000;
 /** `claude -p "/usage"` measured at ~3s; well clear of that, and bounded so a
  *  wedged child can never pile up behind the interval. */
 const SPAWN_TIMEOUT_MS = 30_000;
 
 let running = false;
-/** Only warn once per failure reason — this runs on a timer, and a missing
- *  `claude` on PATH would otherwise fill the log. */
+/** Only warn once per failure reason — this is driven off the tick, and a
+ *  missing `claude` on PATH would otherwise fill the log. */
 let lastFailure = "";
 
+function warnOnce(message: string): void {
+  if (message === lastFailure) return;
+  lastFailure = message;
+  streamDeck.logger.warn(message);
+}
+
 /**
- * Runs the refresher unless one is already in flight or the snapshot is still
- * fresh. Resolves true when a refresh actually ran to completion, so the
- * caller knows a re-read is worthwhile.
+ * Refreshes the snapshot unless one is already in flight or what we have is
+ * still fresh. Resolves true only when `fetchedAtMs` actually moved, so the
+ * caller knows there is something new to draw.
+ *
+ * Reads the "before" value itself rather than taking it as an argument: the
+ * comparison below is only meaningful against what is genuinely on disk at
+ * spawn time, and a caller passing a value it read earlier would quietly break
+ * it. `readUsageSnapshot()` is mtime-gated, so this costs a stat().
  */
-export async function refreshUsageCache(snapshotFetchedAtMs?: number): Promise<boolean> {
+export async function refreshUsageCache(): Promise<boolean> {
   if (running) return false;
-  if (snapshotFetchedAtMs !== undefined && Date.now() - snapshotFetchedAtMs < SKIP_IF_FRESHER_THAN_MS) {
+  const before = (await readUsageSnapshot())?.fetchedAtMs;
+  if (before !== undefined && Date.now() - before < REFRESH_WHEN_OLDER_THAN_MS) {
     return false;
   }
   running = true;
@@ -58,21 +70,25 @@ export async function refreshUsageCache(snapshotFetchedAtMs?: number): Promise<b
       timeoutMs: SPAWN_TIMEOUT_MS,
     });
     if (r.code === 0 && !r.timedOut) {
+      // Exit 0 is not proof of a refresh: `claude -p "/usage"` returns 0 even
+      // when it never reaches the API (observed with a stripped environment —
+      // "Total duration (API): 0s", snapshot untouched). Since we only get here
+      // when the snapshot is past Claude Code's rewrite floor, a fetchedAtMs
+      // that hasn't moved means the refresh did not happen, and the keys would
+      // otherwise sit on a frozen number with nothing in the log.
+      invalidateUsageCache();
+      const after = (await readUsageSnapshot())?.fetchedAtMs;
+      if (after === undefined || after === before) {
+        warnOnce('claude -p "/usage" exited 0 but left the usage snapshot untouched — keys are showing a stale reading');
+        return false;
+      }
       lastFailure = "";
       return true;
     }
-    const reason = r.err ?? (r.timedOut ? "timed out" : `exit ${r.code}: ${r.stderr.trim().split("\n")[0] ?? ""}`);
-    if (reason !== lastFailure) {
-      lastFailure = reason;
-      streamDeck.logger.warn(`usage refresh failed (${reason}) — keys will keep showing the last snapshot`);
-    }
+    warnOnce(`usage refresh failed (${r.err ?? (r.timedOut ? "timed out" : `exit ${r.code}: ${r.stderr.trim().split("\n")[0] ?? ""}`)}) — keys will keep showing the last snapshot`);
     return false;
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    if (reason !== lastFailure) {
-      lastFailure = reason;
-      streamDeck.logger.warn(`usage refresh threw: ${reason}`);
-    }
+    warnOnce(`usage refresh threw: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   } finally {
     running = false;
