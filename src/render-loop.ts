@@ -25,6 +25,8 @@ export async function renderAll(
     const slotIndex = entry?.slotNumber ?? i + 1;
     const state = entry?.state ?? "empty";
     const label = entry?.session.label ?? "";
+    const branch = entry?.session.branch;
+    const badge = entry?.session.badge;
     const todos = entry?.session.todos;
     // Animate the frame when the motif itself animates, OR when an in-progress
     // todo square needs to pulse (renderTodoColumn reads `frame` for the wave).
@@ -32,13 +34,14 @@ export async function renderAll(
     const useFrame = animateFrame ? frame : 0;
 
     const svg = entry
-      ? renderIcon({ state, slot: slotIndex, label, frame: useFrame, todos })
+      ? renderIcon({ state, slot: slotIndex, label, branch, badge, frame: useFrame, todos })
       : renderIcon({ state: "empty", slot: slotIndex, label: "", frame: 0 });
     const dataUrl = "data:image/svg+xml;base64," + Buffer.from(svg, "utf8").toString("base64");
 
     const slotState = slotAction.getState(action.id);
     if (!slotState) continue;
     slotState.label = label;
+    slotState.badge = badge;
     slotState.sessionId = entry?.session.sessionId;
     slotState.origin = entry?.session.origin;
     slotState.pid = entry?.session.pid;
@@ -52,7 +55,12 @@ export async function renderAll(
       const progress = Math.max(0, Math.min(1, elapsed / (KILL_PRESS_MS - LONG_PRESS_MS)));
       // Pinned caption: `label` above is whoever occupies the slot right now,
       // which over a 3 s hold need not still be the session being killed.
-      const killSvg = renderKillArming({ slot: slotIndex, label: slotState.pressedLabel ?? label, progress });
+      const killSvg = renderKillArming({
+        slot: slotIndex,
+        label: slotState.pressedLabel ?? label,
+        badge: slotState.pressedBadge ?? badge,
+        progress,
+      });
       const killUrl = "data:image/svg+xml;base64," + Buffer.from(killSvg, "utf8").toString("base64");
       if (slotState.lastSvg !== killUrl) {
         slotState.lastSvg = killUrl;

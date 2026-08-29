@@ -58,3 +58,25 @@ export const WSL_SETTINGS_FILE_FROM_WIN =
 /** Windows-native sessions dir + settings.json (no WSL involved). */
 export const WIN_SESSIONS_DIR = `${WIN_HOME}\\.claude\\sessions`;
 export const WIN_SETTINGS_FILE = `${WIN_HOME}\\.claude\\settings.json`;
+
+/** Namespace tag a path is expressed in. Mirrors `SessionOrigin` in sessions.ts,
+ *  redeclared here as a literal union so env.ts stays free of imports from the
+ *  modules that depend on it. */
+export type PathOrigin = "wsl" | "windows";
+
+/** Translates a cwd reported by a session into a path *this* process can open.
+ *  Every session writes its cwd in its own namespace: a WSL session reports
+ *  `/home/u/proj`, a Windows-native one `D:\dev\proj`. From the Windows-side
+ *  plugin the former is only reachable over the `\\wsl.localhost\<distro>` UNC.
+ *  Returns undefined when the combination isn't reachable from here, so callers
+ *  can degrade (skip the lookup) instead of throwing. */
+export function localPathForOrigin(p: string, origin: PathOrigin): string | undefined {
+  if (!p) return undefined;
+  if (platform() === "win32") {
+    // Windows-native paths are already local; WSL ones need the same UNC math
+    // as WSL_SESSIONS_DIR_FROM_WIN above.
+    return origin === "windows" ? p : `\\\\wsl.localhost\\${WSL_DISTRO}${p.replace(/\//g, "\\")}`;
+  }
+  // Linux/macOS: SESSION_SOURCES only ever collects the native ("wsl") namespace.
+  return origin === "wsl" ? p : undefined;
+}

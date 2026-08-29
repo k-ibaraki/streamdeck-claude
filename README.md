@@ -26,6 +26,7 @@ Each running `claude` CLI session lights up one key on your deck — project nam
 
 - **Live per-session state** — sessions auto-fill the slots in start-time order; excess sessions beyond the slot count are simply not displayed.
 - **Press → page through sessions.** Keys show a window onto the session list, ordered "needs you first, then most recently active" (see [`docs/architecture.md`](docs/architecture.md#slot-ordering)). A press scrolls that window one page down and wraps at the end; the corner badge is the absolute position, so you can tell 3-of-5 from 1-of-5. The view snaps back to the top on its own as soon as a session newly needs your input.
+- **Repo and branch on the key** — top line is the repository, bottom line the branch it's checked out on (a short SHA if HEAD is detached); both scroll when too long. Sessions sharing a worktree are told apart by a small top-left suffix badge.
 - **Long-press (≥500 ms) → reset that session's state log** — useful if a stuck `awaiting` lingers.
 - **Setup key** — wipes all event logs and re-renders every slot in one press. Also self-checks the hook registration: if it's stale or missing (icons would silently break — e.g. a permission padlock that never clears), the key shows an amber **HOOKS** warning. Fix with `pnpm install:hook`, then reload.
 

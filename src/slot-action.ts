@@ -26,11 +26,15 @@ export interface SlotState {
   pid?: number;
   /** Bound session label, refreshed every tick by the render loop. */
   label?: string;
+  /** Bound session's corner disambiguator, same refresh cycle as `label`. */
+  badge?: string;
   /** Label captured at KeyDown. Slots are ordered by recency, so the entry
    *  under a key can change between press and release, and the KILL ring has to
    *  keep naming the session it is about to kill. (Its pid is already pinned in
    *  onKeyDown's locals, so only the caption could drift.) */
   pressedLabel?: string;
+  /** Badge captured at KeyDown, pinned for the same reason as `pressedLabel`. */
+  pressedBadge?: string;
   /** Wall-clock ms du début d'arming (≥LONG_PRESS_MS tenu). undefined = pas en
    *  arming. Lu par le render-loop pour dessiner l'anneau "KILL". */
   killArmingSince?: number;
@@ -103,6 +107,7 @@ export class SlotAction extends SingletonAction {
     // Freeze what the key was showing at press time — the render loop rewrites
     // `label` every tick as the ordering shifts under us.
     slot.pressedLabel = slot.label;
+    slot.pressedBadge = slot.badge;
     // Un agent bg n'est pas killable (daemon partagé) : on garde le palier 1
     // (wipe du log) mais ni l'anneau KILL ni le palier 2.
     const killable = slot.killable === true;
