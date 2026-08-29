@@ -51,6 +51,12 @@ export const WSL_SETTINGS_FILE = join(WSL_HOME, ".claude", "settings.json");
  *  `cachedUsageUtilization`, the plan-usage snapshot the usage keys read. */
 export const CLAUDE_CONFIG_FILE = join(WSL_HOME, ".claude.json");
 
+/** Dedicated working directory for the `claude -p "/usage"` refresher. Giving
+ *  it a directory of its own is what lets `sessions.ts` recognise and hide the
+ *  transient session it creates, instead of flashing a phantom slot every few
+ *  minutes. */
+export const USAGE_REFRESH_DIR = join(WSL_HOME, ".claude", ".streamdeck-usage");
+
 /** Same paths, but as UNC the Windows-side plugin can read. */
 export const WSL_SESSIONS_DIR_FROM_WIN =
   `\\\\wsl.localhost\\${WSL_DISTRO}${WSL_HOME.replace(/\//g, "\\")}\\.claude\\sessions`;

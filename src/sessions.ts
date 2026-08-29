@@ -3,7 +3,9 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import streamDeck from "@elgato/streamdeck";
 import type { SessionState } from "./icons/index.js";
-import { WIN_SESSIONS_DIR, WSL_SESSIONS_DIR, WSL_SESSIONS_DIR_FROM_WIN } from "./env.js";
+import { WIN_SESSIONS_DIR, WSL_SESSIONS_DIR, WSL_SESSIONS_DIR_FROM_WIN,
+  USAGE_REFRESH_DIR,
+} from "./env.js";
 import { parseEventLog, reduceEvents, type DerivedState, type TodoStatus } from "./session-events.js";
 
 /** WSL or Windows-native Claude Code session — they live in different folders
@@ -150,6 +152,12 @@ async function readOneSource(src: SessionSourceDir): Promise<SessionInfo[]> {
         } catch {
           return;
         }
+        // The `claude -p "/usage"` refresher writes a session file like any
+        // other CLI session. It lives for ~3s and would sort to the top of the
+        // non-attention group (its lastActivityAt is "now"), shoving every
+        // other key down a slot. Its dedicated cwd is how we recognise it.
+        if (raw.cwd === USAGE_REFRESH_DIR) return;
+
         const status = raw.status === "busy" ? "busy" : "idle";
         const kind: "interactive" | "bg" = raw.kind === "bg" ? "bg" : "interactive";
 

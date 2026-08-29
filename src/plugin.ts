@@ -15,6 +15,7 @@ import {
   UsageWeekAction,
 } from "./usage-action.js";
 import { invalidateUsageCache, readUsageSnapshot } from "./usage.js";
+import { refreshUsageCache, USAGE_REFRESH_MS } from "./usage-refresh.js";
 
 streamDeck.logger.setLevel(LogLevel.DEBUG);
 
@@ -82,10 +83,25 @@ async function renderUsage(): Promise<void> {
   await Promise.all(usageActions.map((a) => a.render(snapshot)));
 }
 
-/** Key press on any usage key: force a re-read and repaint all three. */
+/** Key press on any usage key: pull a fresh snapshot if the one we have is old
+ *  enough for Claude Code to replace it, then re-read and repaint all three. */
 async function refreshUsage(): Promise<void> {
+  await runUsageRefresh();
   invalidateUsageCache();
   await renderUsage();
+}
+
+/** Asks Claude Code to refetch its usage snapshot, but only when a usage key is
+ *  actually on the deck — this spawns a process, and users who never placed one
+ *  should never pay for it. */
+async function runUsageRefresh(): Promise<void> {
+  if (!USAGE_SUPPORTED) return;
+  if (!usageActions.some((a) => a.hasInstances())) return;
+  const snapshot = await readUsageSnapshot();
+  if (await refreshUsageCache(snapshot?.fetchedAtMs)) {
+    invalidateUsageCache();
+    await renderUsage();
+  }
 }
 
 const slotAction = new SlotAction(resetSlot, killSlot, advanceView);
@@ -107,6 +123,13 @@ await streamDeck.connect();
 watchForReload({ pollMs: POLL_MS });
 
 setInterval(runSlowTick, POLL_MS);
+
+// Claude Code only refetches its usage snapshot when something asks to see it,
+// which an SDK/GUI-hosted session never does — see usage-refresh.ts.
+setInterval(() => {
+  runUsageRefresh().catch((err) => streamDeck.logger.error("usage refresh tick failed", err));
+}, USAGE_REFRESH_MS);
+runUsageRefresh().catch((err) => streamDeck.logger.error("initial usage refresh failed", err));
 
 let animateRunning = false;
 setInterval(async () => {

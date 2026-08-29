@@ -59,19 +59,37 @@ State priority for an idle session: `awaiting_plan` > `awaiting` > plain `idle`.
 
 Icon code is split per concern across `src/icons/`: `theme.ts` (constants), `motifs.ts` (animated SVG fragments per state), `states.ts` (the single `STATES` registry mapping each `SessionState` to palette + motif + animated flag), `text.ts` (label splitting + marquee), `render.ts` (compose the final SVG). Adding a new state = one entry in `STATES` + plumb it through `deriveState`.
 
-### Plan usage keys (`src/usage.ts`, `src/icons/usage-icon.ts`, `src/usage-action.ts`)
+### Plan usage keys (`src/usage.ts`, `src/usage-refresh.ts`, `src/icons/usage-icon.ts`, `src/usage-action.ts`)
 
 Three optional keys mirror the Claude subscription's rate-limit windows: the 5-hour
 session window, the weekly all-models window, and the per-model weekly windows
 (whatever buckets the server emits — "Fable", "Opus", … — never hardcoded).
 
 The data source is **`~/.claude.json` → `cachedUsageUtilization`**, where Claude Code
-parks the verbatim `/api/oauth/usage` payload it fetched (its own cache TTL is 5
-minutes). Reading that file means no credentials, no network call and no undocumented
-HTTP from the plugin; the cost is that the numbers freeze whenever no CC session is
-talking to the API, so `fetchedAtMs` drives a corner dot past 15 minutes and replaces
-the reset countdown past 30. `readUsageSnapshot()` gates re-parsing on the file's
-mtime — the blob is ~250KB and only the usage slice matters.
+parks the verbatim `/api/oauth/usage` payload it fetched. Reading that file means no
+credentials, no network call and no undocumented HTTP from the plugin.
+`readUsageSnapshot()` gates re-parsing on the file's mtime — the blob is ~250KB and
+only the usage slice matters.
+
+**That cache does not refresh itself.** Claude Code refetches only when something asks
+to *see* usage (startup, `/usage`, the status line, a limit warning); an SDK/GUI-hosted
+session asks for none of those, and the snapshot was measured sitting untouched through
+25+ minutes of continuous work. So `usage-refresh.ts` asks on our behalf: it spawns
+`claude -p "/usage"` every 5½ minutes, which runs the slash command locally (no model
+turn, ~3s) and writes the refreshed snapshot back. The 5½ is deliberate — Claude Code
+refuses to rewrite a snapshot under 5 minutes old, and firing on exactly 5 would
+no-op every other round. It only runs when a usage key is actually on the deck.
+
+The refresher's own session file is the catch: the CLI writes it as
+`kind:"interactive"` like any other, and with `lastActivityAt` of "now" it would sort
+to the top of the non-attention group and shove every key down a slot for ~3s. It runs
+in `USAGE_REFRESH_DIR` (`~/.claude/.streamdeck-usage`) purely so `sessions.ts` can
+recognise its `cwd` and drop it.
+
+Staleness on the tile: `fetchedAtMs` past 15 minutes raises a corner dot, warning that
+the *percentage* may lag. The reset countdown is never suppressed for age — `resets_at`
+is an absolute timestamp and stays true — so the footer only states the snapshot's age
+when there is no future reset left to count down to.
 
 Note the shape differences that bite: `resets_at` is an **ISO string** here (the
 statusLine payload uses epoch seconds), named windows carry `utilization` while

@@ -102,8 +102,11 @@ Icon code is split per concern across `src/icons/`:
 
 The plan-usage keys are a second, much simpler path through the same idea:
 `usage.ts` parses `~/.claude.json` → `cachedUsageUtilization` (mtime-gated, so
-re-parsing the ~250KB blob is rare), `icons/usage-icon.ts` draws a static tile
-per window, and `usage-action.ts` dedups by SVG exactly as `renderAll()` does.
+re-parsing the ~250KB blob is rare), `usage-refresh.ts` keeps that cache from
+going stale by spawning `claude -p "/usage"` on its own interval (Claude Code
+only refetches when something asks to see usage, which an SDK-hosted session
+never does), `icons/usage-icon.ts` draws a static tile per window, and
+`usage-action.ts` dedups by SVG exactly as `renderAll()` does.
 No motif, no animation — the brief was a quiet stepped colour scale. See the
 "Plan usage keys" section of `CLAUDE.md` for the payload's sharp edges (ISO vs
 epoch resets, `utilization` vs `percent`, model- vs surface-scoped entries).
@@ -146,6 +149,7 @@ The Windows hook is **not copied** — `scripts/install-hook.sh --target=windows
 │   ├── render-loop.ts                    # zip slots → setImage
 │   ├── usage.ts                          # reads ~/.claude.json usage snapshot
 │   ├── usage-action.ts                   # the three plan-usage keys
+│   ├── usage-refresh.ts                  # spawns `claude -p "/usage"` to refresh it
 │   ├── env.ts                            # all path/UNC math (single source)
 │   ├── reload-watcher.ts                 # mtime-driven self-restart
 │   ├── warp-focus.ts                     # platform dispatcher
