@@ -35,6 +35,14 @@ const REFRESH_WHEN_OLDER_THAN_MS = CC_WRITE_FLOOR_MS + 30_000;
  *  wedged child can never pile up behind the tick. */
 const SPAWN_TIMEOUT_MS = 30_000;
 
+/**
+ * What an attempt actually accomplished. The tick only acts on `"refreshed"`,
+ * but a key press needs all three: "nothing left to fetch" and "the fetch
+ * broke" have to look different on the key, or a press that could not possibly
+ * help is indistinguishable from one that silently failed.
+ */
+export type UsageRefreshResult = "refreshed" | "current" | "failed";
+
 let running = false;
 /** When we last actually spawned. The snapshot's own age cannot carry this on
  *  its own: if there is no snapshot at all, or the child leaves it untouched,
@@ -54,17 +62,31 @@ function warnOnce(message: string): void {
 
 /**
  * Refreshes the snapshot unless one is already in flight or what we have is
- * still fresh. Resolves true only when `fetchedAtMs` actually moved, so the
- * caller knows there is something new to draw.
+ * still fresh. Resolves `"refreshed"` only when `fetchedAtMs` actually moved,
+ * so the caller knows there is something new to draw.
+ *
+ * `force` is the key press. It skips the `lastAttemptMs` bookkeeping gate but
+ * NOT the snapshot-age check, and that distinction is the whole point. The tick
+ * runs every second, so it claims the attempt slot within ~1s of the snapshot
+ * ageing past the threshold — which leaves a human press a sub-second window to
+ * land in, i.e. none. Dropping the bookkeeping gate makes the press do
+ * something exactly when the user reaches for it: after a failed or wedged
+ * refresh, where the tick would otherwise sit out the next 5m30s and the key
+ * would keep showing a frozen number. Keeping the age check means a press can
+ * never spawn a child that Claude Code would refuse to honour anyway — under
+ * its rewrite floor the reading on the key already is the freshest obtainable
+ * one, so `"current"` is the honest answer, not a failure.
  *
  * Reads the "before" value itself rather than taking it as an argument: the
  * comparison below is only meaningful against what is genuinely on disk at
  * spawn time, and a caller passing a value it read earlier would quietly break
  * it. `readUsageSnapshot()` is mtime-gated, so this costs a stat().
  */
-export async function refreshUsageCache(): Promise<boolean> {
-  if (running) return false;
-  if (Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) return false;
+export async function refreshUsageCache({ force = false } = {}): Promise<UsageRefreshResult> {
+  // A refresh already in flight will repaint the keys when it lands, so a press
+  // arriving on top of one has nothing to add.
+  if (running) return "current";
+  if (!force && Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) return "current";
   // Claimed before the first await, not after: the tick and a key press can
   // both arrive inside one turn of the event loop, and a gap here would let
   // both through and spawn two children.
@@ -72,7 +94,17 @@ export async function refreshUsageCache(): Promise<boolean> {
   try {
     const before = (await readUsageSnapshot())?.fetchedAtMs;
     if (before !== undefined && Date.now() - before < REFRESH_WHEN_OLDER_THAN_MS) {
-      return false;
+      return "current";
+    }
+    // Nothing to age-check against — an API-key-only install, or a config that
+    // has never carried a snapshot. The gate above can never close there, so a
+    // forced press would spawn a child (up to SPAWN_TIMEOUT_MS of blocked
+    // onKeyDown) on *every* press, and warnOnce would stay silent after the
+    // first. The attempt throttle is the only bound left, so the forced path
+    // honours it here and only here — a genuinely stale snapshot still forces
+    // straight through, which is the case a user actually presses for.
+    if (before === undefined && Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) {
+      return "failed";
     }
     lastAttemptMs = Date.now();
     await mkdir(USAGE_REFRESH_DIR, { recursive: true });
@@ -91,16 +123,16 @@ export async function refreshUsageCache(): Promise<boolean> {
       const after = (await readUsageSnapshot())?.fetchedAtMs;
       if (after === undefined || after === before) {
         warnOnce('claude -p "/usage" exited 0 but left the usage snapshot untouched — keys are showing a stale reading');
-        return false;
+        return "failed";
       }
       lastFailure = "";
-      return true;
+      return "refreshed";
     }
     warnOnce(`usage refresh failed (${r.err ?? (r.timedOut ? "timed out" : `exit ${r.code}: ${r.stderr.trim().split("\n")[0] ?? ""}`)}) — keys will keep showing the last snapshot`);
-    return false;
+    return "failed";
   } catch (err) {
     warnOnce(`usage refresh threw: ${err instanceof Error ? err.message : String(err)}`);
-    return false;
+    return "failed";
   } finally {
     running = false;
   }

@@ -9,6 +9,7 @@ import streamDeck, {
 import { platform } from "node:os";
 import { renderUsageIcon, type UsageKind } from "./icons/usage-icon.js";
 import type { UsageSnapshot } from "./usage.js";
+import type { UsageRefreshResult } from "./usage-refresh.js";
 
 /** The usage cache only exists at `~/.claude.json` on the machine running the
  *  CLI. On Windows the plugin reads sessions over a UNC path into WSL, which
@@ -27,7 +28,7 @@ abstract class UsageAction extends SingletonAction {
    *  expensive and the tile only really changes once a minute. */
   private readonly lastSvg = new Map<string, string>();
 
-  constructor(private readonly refreshUsage: () => Promise<void>) {
+  constructor(private readonly refreshUsage: () => Promise<UsageRefreshResult>) {
     super();
   }
 
@@ -44,10 +45,22 @@ abstract class UsageAction extends SingletonAction {
 
   /** Pressing any usage key drops the cached read and re-renders all three —
    *  the underlying snapshot is shared, so refreshing one in isolation would
-   *  leave the others showing an older reading. */
+   *  leave the others showing an older reading.
+   *
+   *  The press always acknowledges itself. Claude Code refuses to rewrite a
+   *  snapshot under five minutes old, so most presses legitimately cannot move
+   *  the number; the tile then renders byte-identical, the dedup below swallows
+   *  the repaint, and with no overlay the key looks broken. A tick means "what
+   *  you are looking at is the freshest reading obtainable", an alert means the
+   *  refetch itself failed and the number really is stale. */
   override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    if (!USAGE_SUPPORTED) {
+      await ev.action.showAlert().catch(() => {});
+      return;
+    }
     try {
-      await this.refreshUsage();
+      const result = await this.refreshUsage();
+      await (result === "failed" ? ev.action.showAlert() : ev.action.showOk()).catch(() => {});
     } catch (err) {
       streamDeck.logger.warn(`usage refresh failed: ${err instanceof Error ? err.message : String(err)}`);
       await ev.action.showAlert().catch(() => {});
