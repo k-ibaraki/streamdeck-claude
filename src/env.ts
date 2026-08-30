@@ -57,6 +57,33 @@ export const CLAUDE_CONFIG_FILE = join(WSL_HOME, ".claude.json");
  *  minutes. */
 export const USAGE_REFRESH_DIR = join(WSL_HOME, ".claude", ".streamdeck-usage");
 
+/** Directories prepended to PATH before the plugin spawns the `claude` CLI.
+ *
+ *  The Stream Deck app is started by launchd, which hands its children the
+ *  bare system PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) — it has never sourced a
+ *  shell rc, so the native installer's `~/.local/bin` is invisible and the
+ *  spawn dies with ENOENT. That is not hypothetical: it is what froze the
+ *  usage keys on a stale reading for days, warning exactly once (warnOnce) and
+ *  then saying nothing at all.
+ *
+ *  Prepending to PATH rather than resolving one absolute binary keeps a
+ *  `claude` that genuinely is on PATH winning, and covers the Homebrew and
+ *  npm-global locations in the same breath. Empty on Windows, where the plugin
+ *  never spawns the CLI. */
+const CLI_DIRS = platform() === "win32"
+  ? []
+  : [join(WSL_HOME, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+
+/** `process.env` with CLI_DIRS prepended to PATH. Returns `process.env`
+ *  untouched when it already covers them, so the common case allocates
+ *  nothing and a user with a properly-set PATH sees no change at all. */
+export function envWithCliPath(): NodeJS.ProcessEnv {
+  const path = process.env.PATH ?? "";
+  const present = new Set(path.split(":"));
+  const missing = CLI_DIRS.filter((d) => !present.has(d));
+  return missing.length === 0 ? process.env : { ...process.env, PATH: [...missing, path].join(":") };
+}
+
 /** Same paths, but as UNC the Windows-side plugin can read. */
 export const WSL_SESSIONS_DIR_FROM_WIN =
   `\\\\wsl.localhost\\${WSL_DISTRO}${WSL_HOME.replace(/\//g, "\\")}\\.claude\\sessions`;

@@ -15,7 +15,7 @@ import {
   UsageWeekAction,
 } from "./usage-action.js";
 import { invalidateUsageCache, readUsageSnapshot } from "./usage.js";
-import { refreshUsageCache } from "./usage-refresh.js";
+import { refreshUsageCache, type UsageRefreshResult } from "./usage-refresh.js";
 
 streamDeck.logger.setLevel(LogLevel.DEBUG);
 
@@ -90,11 +90,16 @@ async function renderUsage(): Promise<void> {
 }
 
 /** Key press on any usage key: pull a fresh snapshot if the one we have is old
- *  enough for Claude Code to replace it, then re-read and repaint all three. */
-async function refreshUsage(): Promise<void> {
-  await runUsageRefresh();
+ *  enough for Claude Code to replace it, then re-read and repaint all three.
+ *
+ *  Forced, so the press is not held off by the tick's own attempt throttle —
+ *  see refreshUsageCache(). The outcome travels back to the action, which is
+ *  the only place that can acknowledge the press on the key itself. */
+async function refreshUsage(): Promise<UsageRefreshResult> {
+  const result = await runUsageRefresh({ force: true });
   invalidateUsageCache();
   await renderUsage();
+  return result;
 }
 
 /** Asks Claude Code to refetch its usage snapshot, but only when a usage key is
@@ -104,12 +109,19 @@ async function refreshUsage(): Promise<void> {
  *  Driven from the slow tick rather than its own interval: action instances are
  *  populated by `willAppear`, which arrives after `connect()` resolves, so any
  *  check made at startup would read an empty list and skip. */
-async function runUsageRefresh(): Promise<void> {
-  if (!USAGE_SUPPORTED) return;
-  if (!usageActions.some((a) => a.hasInstances())) return;
+async function runUsageRefresh(opts: { force?: boolean } = {}): Promise<UsageRefreshResult> {
+  // Both guards mean "nothing to fetch", not "the fetch broke" — this runs off
+  // the tick every second, and calling that a failure would be a lie about the
+  // overwhelming majority of callers. The press says so on the key itself; the
+  // unsupported case is the action's to report, since it owns that platform
+  // check already.
+  if (!USAGE_SUPPORTED) return "current";
+  if (!usageActions.some((a) => a.hasInstances())) return "current";
   // refreshUsageCache() leaves the freshly-parsed snapshot in usage.ts's cache,
   // so renderUsage() picks it up without another invalidation.
-  if (await refreshUsageCache()) await renderUsage();
+  const result = await refreshUsageCache(opts);
+  if (result === "refreshed") await renderUsage();
+  return result;
 }
 
 const slotAction = new SlotAction(resetSlot, killSlot, advanceView);

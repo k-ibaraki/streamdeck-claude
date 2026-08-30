@@ -83,6 +83,21 @@ The 5½ is deliberate — Claude Code refuses to rewrite a snapshot under 5 minu
 and landing exactly on that floor would no-op every other round. It only runs when a
 usage key is actually on the deck.
 
+**The child gets its PATH from `envWithCliPath()`, not from the plugin's own.** The
+Stream Deck app is launched by launchd, which hands it the bare system PATH — no
+shell rc has ever run in that process — so the native installer's `~/.local/bin` is
+simply absent and the spawn dies with `spawn claude ENOENT`. That was live on macOS
+for days: `warnOnce` said it once and then nothing, while the keys sat on a snapshot
+45 minutes old and the press path (below) had no way to say so either. `CLI_DIRS` in
+`env.ts` prepends `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. An
+npm-global install under a node version manager (mise, nvm, fnm, volta) lands in a
+version-scoped directory none of those can guess, so an ENOENT retries once through
+`$SHELL -ilc`, asking the user's own shell where the binary is. The `-i` is load-
+bearing: zsh sources `.zshrc` only for interactive shells, and `.zshrc` is where a
+PATH export overwhelmingly lives — `-lc` alone was measured returning "not found" on
+a machine where `-ilc` resolves it. It costs the rc's startup (~2.9s), paid only on a
+path that is otherwise a guaranteed failure.
+
 Two things about *how* it is driven. It rides the slow tick rather than owning an
 interval, because action instances are filled in by `willAppear`, which arrives after
 `connect()` resolves — anything checking "is a usage key on the deck?" at startup reads
@@ -90,11 +105,34 @@ an empty list and skips, so the first refresh would be a whole cycle late. And t
 does not await it: the child takes ~3s, which would hold `slowTickRunning` and freeze
 every session key for that long.
 
-Both gates matter: the snapshot's age decides whether a refresh is *worth* asking
-for, and the time of the last spawn decides whether we are *allowed* to ask. Without
-the second, an account with no snapshot at all — or a child that exits 0 without
-refreshing — leaves the age gate permanently open, and the tick relaunches the moment
-the previous child exits: a spawn every ~3s, forever.
+Both gates matter *for the tick*: the snapshot's age decides whether a refresh is
+*worth* asking for, and the time of the last spawn decides whether we are *allowed*
+to ask. Without the second, an account with no snapshot at all — or a child that
+exits 0 without refreshing — leaves the age gate permanently open, and the tick
+relaunches the moment the previous child exits: a spawn every ~3s, forever.
+
+A key press is the one caller that skips the attempt gate — `refreshUsageCache()`
+with `force` — and it skips only that one. The tick runs every second, so it claims the
+attempt slot within ~1s of the snapshot ageing past 5½ minutes — which leaves a human
+press a sub-second window to land in, i.e. none in practice; before this the press
+path was unreachable. Skipping the attempt gate makes the press useful exactly where
+the tick is useless: after a failed or wedged refresh, where the key would otherwise
+sit on a frozen number for the next 5½ minutes. It does **not** skip the age gate —
+under Claude Code's rewrite floor a refetch could only no-op, and forcing one would
+make the "exited 0 but untouched" check below cry wolf. The single exception is the
+no-snapshot account above: the age gate cannot close there, so the press honours the
+attempt throttle instead, which is the only bound left on it.
+
+Because a press often cannot legitimately move the number, it always answers on the
+key. `refreshUsageCache()` returns `"refreshed" | "current" | "failed"` rather than a
+boolean, and `usage-action.ts` turns that into `showOk()` / `showAlert()` — without
+it the tile renders byte-identical, the SVG dedup swallows the repaint, and the press
+looks broken, which is the whole reason the flag exists. A caller landing on top of
+an in-flight attempt is handed that attempt's promise, so it reports what actually
+happened rather than guessing. The press stops waiting after `VERDICT_TIMEOUT_MS`
+(12s) and says so, but never cancels the child: killing it would make a merely slow
+`claude` fail permanently, since the attempt throttle would then hold the tick off
+for 5½ minutes as well.
 
 Exit code 0 is not proof of a refresh. `claude -p "/usage"` returns 0 even when it never
 reaches the API (reproduced with a stripped environment: "Total duration (API): 0s",
