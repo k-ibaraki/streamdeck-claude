@@ -43,7 +43,10 @@ const SPAWN_TIMEOUT_MS = 30_000;
  */
 export type UsageRefreshResult = "refreshed" | "current" | "failed";
 
-let running = false;
+/** The attempt currently in flight, if any. A promise rather than a boolean:
+ *  a caller arriving on top of one needs that attempt's actual verdict, not a
+ *  guess about it — see refreshUsageCache(). */
+let inFlight: Promise<UsageRefreshResult> | undefined;
 /** When we last actually spawned. The snapshot's own age cannot carry this on
  *  its own: if there is no snapshot at all, or the child leaves it untouched,
  *  the age gate never closes and the tick would relaunch the moment the last
@@ -77,20 +80,37 @@ function warnOnce(message: string): void {
  * its rewrite floor the reading on the key already is the freshest obtainable
  * one, so `"current"` is the honest answer, not a failure.
  *
+ * A caller arriving while an attempt is in flight is handed that attempt's own
+ * promise, so it reports what actually happened instead of assuming success.
+ *
  * Reads the "before" value itself rather than taking it as an argument: the
  * comparison below is only meaningful against what is genuinely on disk at
  * spawn time, and a caller passing a value it read earlier would quietly break
  * it. `readUsageSnapshot()` is mtime-gated, so this costs a stat().
  */
 export async function refreshUsageCache({ force = false } = {}): Promise<UsageRefreshResult> {
-  // A refresh already in flight will repaint the keys when it lands, so a press
-  // arriving on top of one has nothing to add.
-  if (running) return "current";
+  // An attempt already in flight answers this call too. Reporting "current"
+  // here instead would be a guess about something that has not finished, and
+  // when that attempt fails the guess is wrong in the one direction that
+  // matters: a key press acknowledged with a tick, over a number that never
+  // moved. Handing back the same promise also keeps two children from
+  // overlapping, which is all the old boolean guard did.
+  if (inFlight) return inFlight;
   if (!force && Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) return "current";
-  // Claimed before the first await, not after: the tick and a key press can
+  // Assigned before the first await, not after: the tick and a key press can
   // both arrive inside one turn of the event loop, and a gap here would let
   // both through and spawn two children.
-  running = true;
+  inFlight = attemptRefresh();
+  try {
+    return await inFlight;
+  } finally {
+    inFlight = undefined;
+  }
+}
+
+/** The attempt itself. Split out so `refreshUsageCache()` can publish the
+ *  promise before awaiting it. */
+async function attemptRefresh(): Promise<UsageRefreshResult> {
   try {
     const before = (await readUsageSnapshot())?.fetchedAtMs;
     if (before !== undefined && Date.now() - before < REFRESH_WHEN_OLDER_THAN_MS) {
@@ -98,9 +118,9 @@ export async function refreshUsageCache({ force = false } = {}): Promise<UsageRe
     }
     // Nothing to age-check against — an API-key-only install, or a config that
     // has never carried a snapshot. The gate above can never close there, so a
-    // forced press would spawn a child (up to SPAWN_TIMEOUT_MS of blocked
-    // onKeyDown) on *every* press, and warnOnce would stay silent after the
-    // first. The attempt throttle is the only bound left, so the forced path
+    // forced press would spawn a child on *every* press, and warnOnce would
+    // stay silent after the first. The attempt throttle is the only bound
+    // left, so the forced path
     // honours it here and only here — a genuinely stale snapshot still forces
     // straight through, which is the case a user actually presses for.
     if (before === undefined && Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) {
@@ -133,7 +153,5 @@ export async function refreshUsageCache({ force = false } = {}): Promise<UsageRe
   } catch (err) {
     warnOnce(`usage refresh threw: ${err instanceof Error ? err.message : String(err)}`);
     return "failed";
-  } finally {
-    running = false;
   }
 }
