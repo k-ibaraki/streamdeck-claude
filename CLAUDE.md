@@ -83,6 +83,15 @@ The 5½ is deliberate — Claude Code refuses to rewrite a snapshot under 5 minu
 and landing exactly on that floor would no-op every other round. It only runs when a
 usage key is actually on the deck.
 
+**The child gets its PATH from `envWithCliPath()`, not from the plugin's own.** The
+Stream Deck app is launched by launchd, which hands it the bare system PATH — no
+shell rc has ever run in that process — so the native installer's `~/.local/bin` is
+simply absent and the spawn dies with `spawn claude ENOENT`. That was live on macOS
+for days: `warnOnce` said it once and then nothing, while the keys sat on a snapshot
+45 minutes old and the press path (below) had no way to say so either. `CLI_DIRS` in
+`env.ts` prepends `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`; an install
+anywhere else needs a line there, and the ENOENT warning names the file.
+
 Two things about *how* it is driven. It rides the slow tick rather than owning an
 interval, because action instances are filled in by `willAppear`, which arrives after
 `connect()` resolves — anything checking "is a usage key on the deck?" at startup reads

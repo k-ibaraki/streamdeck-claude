@@ -17,6 +17,8 @@ export interface CaptureOptions {
   stdin?: string;
   /** Working directory for the child. Inherited from the plugin if omitted. */
   cwd?: string;
+  /** Environment for the child. Inherited from the plugin if omitted. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -32,7 +34,7 @@ export function spawnCapture(
 ): Promise<CaptureResult> {
   return new Promise((resolve) => {
     const stdinMode = opts.stdin !== undefined ? "pipe" : "ignore";
-    const child = spawn(cmd, [...args], { stdio: [stdinMode, "pipe", "pipe"], cwd: opts.cwd });
+    const child = spawn(cmd, [...args], { stdio: [stdinMode, "pipe", "pipe"], cwd: opts.cwd, env: opts.env });
     let stdout = "";
     let stderr = "";
     let timedOut = false;

@@ -1,6 +1,6 @@
 import streamDeck from "@elgato/streamdeck";
 import { mkdir } from "node:fs/promises";
-import { USAGE_REFRESH_DIR } from "./env.js";
+import { envWithCliPath, USAGE_REFRESH_DIR } from "./env.js";
 import { spawnCapture } from "./spawn-capture.js";
 import { invalidateUsageCache, readUsageSnapshot } from "./usage.js";
 
@@ -131,6 +131,7 @@ async function attemptRefresh(): Promise<UsageRefreshResult> {
     const r = await spawnCapture("claude", ["-p", "/usage"], {
       cwd: USAGE_REFRESH_DIR,
       timeoutMs: SPAWN_TIMEOUT_MS,
+      env: envWithCliPath(),
     });
     if (r.code === 0 && !r.timedOut) {
       // Exit 0 is not proof of a refresh: `claude -p "/usage"` returns 0 even
@@ -148,7 +149,12 @@ async function attemptRefresh(): Promise<UsageRefreshResult> {
       lastFailure = "";
       return "refreshed";
     }
-    warnOnce(`usage refresh failed (${r.err ?? (r.timedOut ? "timed out" : `exit ${r.code}: ${r.stderr.trim().split("\n")[0] ?? ""}`)}) — keys will keep showing the last snapshot`);
+    // ENOENT gets its own hint: PATH is the one failure the user can fix, and
+    // the plugin's PATH is launchd's, not the one their terminal shows them.
+    const hint = r.err?.includes("ENOENT")
+      ? " — `claude` is not on the plugin's PATH (launchd's, not your shell's); add its directory to CLI_DIRS in env.ts"
+      : " — keys will keep showing the last snapshot";
+    warnOnce(`usage refresh failed (${r.err ?? (r.timedOut ? "timed out" : `exit ${r.code}: ${r.stderr.trim().split("\n")[0] ?? ""}`)})${hint}`);
     return "failed";
   } catch (err) {
     warnOnce(`usage refresh threw: ${err instanceof Error ? err.message : String(err)}`);
