@@ -74,7 +74,7 @@ export function wrapTwoLines(text: string, fontSize: number): [string, string] |
  *  the intended degradation, not a bug.
  *
  *  `clipId` must be unique within the SVG this fragment lands in. Each key is its
- *  own standalone document, so plain `ct`/`cb` are enough. */
+ *  own standalone document, so plain `ct` / `cb0`..`cbN` are enough. */
 export function textLine(opts: {
   text: string;
   baseline: number;

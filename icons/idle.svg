@@ -5,7 +5,7 @@
 <text x="128" y="19" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#3b82f6" opacity="0.8" text-anchor="end">3</text>
 
 <defs><clipPath id="ct"><rect x="10" y="19" width="124" height="23"/></clipPath></defs>
-<text clip-path="url(#ct)" x="72" y="35" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="19" font-weight="700" fill="#3b82f6" text-anchor="middle">wolfgangp…</text>
+<text clip-path="url(#ct)" x="72" y="35" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="19" font-weight="700" fill="#3b82f6" text-anchor="middle">wolfgangpar…</text>
 <g transform="translate(0,12)"><g transform="translate(42 16) scale(4)">
 <rect x="3" y="15" width="9" height="1" fill="#000" opacity="0.45"/>
 <rect x="3" y="12" width="1" height="3" fill="#DE886D"/>
@@ -22,7 +22,7 @@
 </g>
 </g>
 </g></g>
-<defs><clipPath id="cb"><rect x="10" y="118" width="124" height="20"/></clipPath></defs>
-<text clip-path="url(#cb)" x="72" y="132" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="17" font-weight="600" fill="#bfdbfe" text-anchor="middle">main</text>
+<defs><clipPath id="cb0"><rect x="10" y="118" width="124" height="20"/></clipPath></defs>
+<text clip-path="url(#cb0)" x="72" y="132" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="17" font-weight="600" fill="#bfdbfe" text-anchor="middle">main</text>
 
 </svg>
