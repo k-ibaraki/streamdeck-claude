@@ -7,11 +7,14 @@ import {
   BORDER_STROKE,
   BOTTOM_BASELINE,
   BOTTOM_FONT,
+  BOTTOM_TWO_FONT,
+  BOTTOM_TWO_LINE1_BASELINE,
   MOTIF_DY,
+  MOTIF_SCALE_TWO_LINE,
   TOP_BASELINE,
   TOP_FONT,
 } from "./theme.js";
-import { textLine, xmlEscape } from "./text.js";
+import { overflows, textLine, wrapTwoLines, xmlEscape } from "./text.js";
 import { STATES, isBgState, type SessionState } from "./states.js";
 import { ANIMATION_FRAMES } from "./motifs.js";
 import type { TodoStatus } from "../session-events.js";
@@ -27,8 +30,9 @@ export interface IconOptions {
   slot: number;
   /** Top line — repo name, or the session name the user pinned explicitly. */
   label: string;
-  /** Bottom line — current branch (or short SHA when detached). Omitted when
-   *  the session's cwd isn't in a repo we can read. */
+  /** Bottom caption — current branch (or short SHA when detached). Wraps onto a
+   *  second line when it doesn't fit on one. Omitted when the session's cwd isn't
+   *  in a repo we can read. */
   branch?: string;
   /** Corner disambiguator (`b7`) for sessions sharing one worktree. */
   badge?: string;
@@ -87,6 +91,15 @@ function renderTopLeftBadge(text: string, accent: string): string {
   return `<text x="16" y="${BADGE_BASELINE}" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="${BADGE_FONT}" font-weight="700" fill="${accent}" opacity="0.8" text-anchor="start">${xmlEscape(text)}</text>`;
 }
 
+/** How to draw the branch caption: one line at full size, one line a size down,
+ *  or two wrapped lines. Only the last case makes the motif give up height, so
+ *  a name that merely needs a smaller face doesn't disturb the tile's geometry. */
+function branchCaption(branch: string): { lines: string[]; fontSize: number } {
+  if (!overflows(branch, BOTTOM_FONT)) return { lines: [branch], fontSize: BOTTOM_FONT };
+  const wrapped = wrapTwoLines(branch, BOTTOM_TWO_FONT);
+  return { lines: wrapped ?? [branch], fontSize: BOTTOM_TWO_FONT };
+}
+
 export function renderIcon({ state, slot, label, branch, badge, frame = 0, todos }: IconOptions): string {
   const { bg, accent, label: labelColor } = STATES[state].palette;
   const slotText = state === "empty" ? "" : String(slot);
@@ -105,16 +118,32 @@ export function renderIcon({ state, slot, label, branch, badge, frame = 0, todos
     clipId: "ct",
   });
 
-  const bottomSvg = bottom
-    ? textLine({
-        text: bottom,
-        baseline: BOTTOM_BASELINE,
-        fontSize: BOTTOM_FONT,
-        weight: "600",
-        color: labelColor,
-        clipId: "cb",
-      })
+  // Three fits, cheapest first: the whole branch at full size, the whole branch a
+  // size down, or wrapped onto two lines. Only the last costs the motif height,
+  // so only the keys that would otherwise be cut mid-prefix pay for it.
+  const caption = bottom ? branchCaption(bottom) : null;
+  const wrapped = caption !== null && caption.lines.length === 2;
+  const bottomSvg = caption
+    ? caption.lines
+        .map((text, i) =>
+          textLine({
+            text,
+            // The last line always sits on BOTTOM_BASELINE, so the caption grows
+            // upward and every key stays aligned along its lower edge.
+            baseline: i === caption.lines.length - 1 ? BOTTOM_BASELINE : BOTTOM_TWO_LINE1_BASELINE,
+            fontSize: caption.fontSize,
+            weight: "600",
+            color: labelColor,
+            clipId: `cb${i}`,
+          }),
+        )
+        .join("")
     : "";
+  // Scale about the motif's own centre so it shrinks in place rather than
+  // drifting toward the origin.
+  const motifTransform = wrapped
+    ? `translate(0,${MOTIF_DY}) translate(72,60) scale(${MOTIF_SCALE_TWO_LINE}) translate(-72,-60)`
+    : `translate(0,${MOTIF_DY})`;
 
   // Slot number badge — inside the safe zone, away from the rounded corner.
   const slotBadge = isEmpty ? "" : renderSlotBadge(slotText, accent);
@@ -143,7 +172,7 @@ ${pulseOverlay}
 ${slotBadge}
 ${cornerBadge}
 ${topLine}
-<g transform="translate(0,${MOTIF_DY})">${STATES[state].motif(frame, accent)}</g>
+<g transform="${motifTransform}">${STATES[state].motif(frame, accent)}</g>
 ${bottomSvg}
 ${todoColumn}
 </svg>`;

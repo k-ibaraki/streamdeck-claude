@@ -18,7 +18,23 @@ export const TOP_FONT = 19;
 // for TOP_BASELINE=35). Without this, idle/error/awaiting motifs whose top
 // extent is y=32 visibly graze the project name above.
 export const MOTIF_DY = 12;
-/** Baseline of the single bottom line (the branch name). Sits low so it reads
- *  as anchored to the key's lower edge rather than floating under the motif. */
+/** Baseline of the last bottom line (the branch name). Sits low so it reads
+ *  as anchored to the key's lower edge rather than floating under the motif.
+ *  A wrapped branch keeps this baseline for its second line, so the block grows
+ *  upward and short and long branches stay aligned along the bottom edge. */
 export const BOTTOM_BASELINE = 132;
 export const BOTTOM_FONT = 17;
+// Fallback size for a branch too wide at BOTTOM_FONT. It buys ~2 characters,
+// which is often enough on its own; when it isn't, the name wraps onto two of
+// these lines 18px apart, putting the upper line's clip box at y=101..119 —
+// the number the motif has to clear.
+export const BOTTOM_TWO_FONT = 15;
+export const BOTTOM_TWO_LINE1_BASELINE = BOTTOM_BASELINE - 18;
+/** Shrink applied to the motif when the branch wraps, about its own centre
+ *  (72,60). The motifs span y=25..95 across every state and frame (the widest
+ *  are `subagent`'s orbiting satellite and `awaiting`'s pulse), so at MOTIF_DY
+ *  they occupy 37..107 — 6px into the wrapped label. 0.77 pulls that back to
+ *  45..99, clearing the top line's descender (y=42) and the wrapped label's clip
+ *  top (y=101) with ~2px to spare on each side. Keys whose branch fits on one
+ *  line keep the motif at full size. */
+export const MOTIF_SCALE_TWO_LINE = 0.77;
