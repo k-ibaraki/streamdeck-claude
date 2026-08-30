@@ -89,8 +89,14 @@ shell rc has ever run in that process — so the native installer's `~/.local/bi
 simply absent and the spawn dies with `spawn claude ENOENT`. That was live on macOS
 for days: `warnOnce` said it once and then nothing, while the keys sat on a snapshot
 45 minutes old and the press path (below) had no way to say so either. `CLI_DIRS` in
-`env.ts` prepends `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`; an install
-anywhere else needs a line there, and the ENOENT warning names the file.
+`env.ts` prepends `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. An
+npm-global install under a node version manager (mise, nvm, fnm, volta) lands in a
+version-scoped directory none of those can guess, so an ENOENT retries once through
+`$SHELL -ilc`, asking the user's own shell where the binary is. The `-i` is load-
+bearing: zsh sources `.zshrc` only for interactive shells, and `.zshrc` is where a
+PATH export overwhelmingly lives — `-lc` alone was measured returning "not found" on
+a machine where `-ilc` resolves it. It costs the rc's startup (~2.9s), paid only on a
+path that is otherwise a guaranteed failure.
 
 Two things about *how* it is driven. It rides the slow tick rather than owning an
 interval, because action instances are filled in by `willAppear`, which arrives after

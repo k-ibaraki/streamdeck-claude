@@ -155,7 +155,7 @@ The Windows hook is **not copied** — `scripts/install-hook.sh --target=windows
 │   ├── usage.ts                          # reads ~/.claude.json usage snapshot
 │   ├── usage-action.ts                   # the three plan-usage keys
 │   ├── usage-refresh.ts                  # spawns `claude -p "/usage"` to refresh it
-│   ├── env.ts                            # all path/UNC math (single source)
+│   ├── env.ts                            # all path/UNC math + the CLI's PATH (single source)
 │   ├── reload-watcher.ts                 # mtime-driven self-restart
 │   ├── warp-focus.ts                     # platform dispatcher
 │   ├── warp-focus-mac.ts                 # osascript activate + Cmd+digit / cycle

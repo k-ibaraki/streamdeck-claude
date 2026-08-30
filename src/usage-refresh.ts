@@ -119,20 +119,43 @@ async function attemptRefresh(): Promise<UsageRefreshResult> {
     // Nothing to age-check against — an API-key-only install, or a config that
     // has never carried a snapshot. The gate above can never close there, so a
     // forced press would spawn a child on *every* press, and warnOnce would
-    // stay silent after the first. The attempt throttle is the only bound
-    // left, so the forced path
-    // honours it here and only here — a genuinely stale snapshot still forces
-    // straight through, which is the case a user actually presses for.
+    // stay silent after the first. The attempt throttle is the only bound left,
+    // so the forced path honours it here and only here — a genuinely stale
+    // snapshot still forces straight through, which is the case a user
+    // actually presses for.
     if (before === undefined && Date.now() - lastAttemptMs < REFRESH_WHEN_OLDER_THAN_MS) {
       return "failed";
     }
     lastAttemptMs = Date.now();
     await mkdir(USAGE_REFRESH_DIR, { recursive: true });
-    const r = await spawnCapture("claude", ["-p", "/usage"], {
+    let r = await spawnCapture("claude", ["-p", "/usage"], {
       cwd: USAGE_REFRESH_DIR,
       timeoutMs: SPAWN_TIMEOUT_MS,
       env: envWithCliPath(),
     });
+    // CLI_DIRS covers the standard install locations, but not a `claude` that
+    // npm put under a node version manager (mise, nvm, fnm, volta): those bin
+    // directories are version-scoped and unguessable. The user's own shell
+    // knows where it is, so ask it. Reached only when the direct spawn found
+    // nothing at all, so it can turn a certain failure into a possible success
+    // and nothing else.
+    //
+    // `-i` is not decoration. zsh sources `.zshrc` only for *interactive*
+    // shells, and `.zshrc` is where a PATH export overwhelmingly lives — `-lc`
+    // alone reads just `.zshenv`/`.zprofile` and was measured returning
+    // "not found" on a machine where `-ilc` resolves the binary fine. bash
+    // splits the same way (`.bashrc` interactive, `.bash_profile` login), so
+    // both flags earn their place. The cost is the rc's own startup, ~2.9s
+    // here, paid only on a path that is otherwise a guaranteed failure and
+    // bounded by SPAWN_TIMEOUT_MS like any other child.
+    const notOnPath = r.err?.includes("ENOENT") === true;
+    if (notOnPath) {
+      r = await spawnCapture(process.env.SHELL ?? "/bin/sh", ["-ilc", 'claude -p "/usage"'], {
+        cwd: USAGE_REFRESH_DIR,
+        timeoutMs: SPAWN_TIMEOUT_MS,
+        env: envWithCliPath(),
+      });
+    }
     if (r.code === 0 && !r.timedOut) {
       // Exit 0 is not proof of a refresh: `claude -p "/usage"` returns 0 even
       // when it never reaches the API (observed with a stripped environment —
@@ -149,10 +172,13 @@ async function attemptRefresh(): Promise<UsageRefreshResult> {
       lastFailure = "";
       return "refreshed";
     }
-    // ENOENT gets its own hint: PATH is the one failure the user can fix, and
-    // the plugin's PATH is launchd's, not the one their terminal shows them.
-    const hint = r.err?.includes("ENOENT")
-      ? " — `claude` is not on the plugin's PATH (launchd's, not your shell's); add its directory to CLI_DIRS in env.ts"
+    // A missing binary gets its own hint. It is the one failure the user can
+    // act on, and the reason is never obvious: the plugin's PATH is launchd's,
+    // not the one their terminal shows them. Keyed off the *direct* spawn,
+    // because the fallback reports a shell that ran fine and found nothing
+    // (exit 127), not an ENOENT of its own.
+    const hint = notOnPath
+      ? " — `claude` is not on the plugin's PATH and the login-shell fallback did not find it either; the Stream Deck app inherits launchd's environment, not your shell's"
       : " — keys will keep showing the last snapshot";
     warnOnce(`usage refresh failed (${r.err ?? (r.timedOut ? "timed out" : `exit ${r.code}: ${r.stderr.trim().split("\n")[0] ?? ""}`)})${hint}`);
     return "failed";
